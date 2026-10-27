@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101712">
+  <meta name="description" content="Wildlife Vision: live camera motion tracking and an offline bird-image dataset library.">
+  <title>Wildlife Vision</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Wildlife Vision home">
+      <span class="brand-mark">WV</span>
+      <span><strong>WILDLIFE VISION</strong><small>FIELD OBSERVATION SYSTEM</small></span>
+    </a>
+    <div class="top-status"><span id="statusDot" class="status-dot"></span><span id="topStatus">CAMERA OFFLINE</span></div>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div>
+        <p class="eyebrow">OBSERVE · TRACK · REVIEW</p>
+        <h1>See what moves.</h1>
+        <p class="lede">Live camera monitoring, experimental motion tracking, and a local image library. No cloud account required.</p>
+      </div>
+      <div class="model-note"><span class="note-icon">i</span><span><strong>Identification status</strong><br>Motion tracking works now. Species recognition requires a compatible trained model, which is not included in the original project.</span></div>
+    </section>
+
+    <nav class="tabs" aria-label="Main sections">
+      <button class="tab active" data-tab="camera">Live camera</button>
+      <button class="tab" data-tab="library">Bird library <span id="libraryCount" class="count">0</span></button>
+      <button class="tab" data-tab="diagnostics">Diagnostics</button>
+    </nav>
+
+    <section id="cameraPanel" class="panel active">
+      <div class="section-heading">
+        <div><p class="eyebrow">LIVE OBSERVATION</p><h2>Camera monitor</h2></div>
+        <div class="live-pill"><span id="liveDot" class="status-dot"></span><span id="liveLabel">STANDBY</span></div>
+      </div>
+
+      <div class="camera-layout">
+        <div class="camera-column">
+          <div id="cameraStage" class="camera-stage">
+            <video id="cameraVideo" autoplay muted playsinline></video>
+            <canvas id="motionCanvas" aria-label="Motion tracking overlay"></canvas>
+            <div id="cameraPlaceholder" class="camera-placeholder">
+              <div class="camera-glyph">◉</div>
+              <strong>Camera feed inactive</strong>
+              <span>Start the camera and allow Safari to access it.</span>
+            </div>
+            <div class="stage-chip chip-top"><span class="status-dot"></span> LIVE FEED</div>
+            <div class="stage-chip chip-bottom" id="motionReadout">MOTION 0.0%</div>
+          </div>
+          <div class="camera-controls">
+            <button id="startCamera" class="button primary">Start camera</button>
+            <button id="stopCamera" class="button secondary" disabled>Pause</button>
+            <button id="resetTracks" class="button secondary">Reset tracks</button>
+            <button id="maskMode" class="button secondary">Draw exclusion mask</button>
+          </div>
+          <p id="maskHelp" class="helper hidden">Drag over the preview to mark an area to ignore. Masks are visual rectangles; draw again to add another. Use Clear masks to remove them.</p>
+          <div class="zoom-row">
+            <label for="zoomSlider">Zoom <strong id="zoomValue">1.0×</strong></label>
+            <input id="zoomSlider" type="range" min="1" max="3" step="0.1" value="1" disabled>
+            <button id="zoomReset" class="button tiny secondary">Reset</button>
+          </div>
+        </div>
+
+        <aside class="side-column">
+          <div class="metric-grid">
+            <div class="metric-card"><span class="metric-label">Motion regions</span><strong id="motionCount">0</strong><small>Current frame</small></div>
+            <div class="metric-card"><span class="metric-label">Tracked IDs</span><strong id="trackCount">0</strong><small>Active tracks</small></div>
+            <div class="metric-card"><span class="metric-label">Motion score</span><strong id="motionScore">0.0%</strong><small>Changed pixels</small></div>
+            <div class="metric-card"><span class="metric-label">Excluded areas</span><strong id="maskCount">0</strong><small>Ignore zones</small></div>
+          </div>
+          <div class="card">
+            <div class="card-heading"><div><p class="eyebrow">FRAME DIFFERENCING</p><h3>Detection settings</h3></div></div>
+            <div class="setting">
+              <div class="setting-label"><label for="sensitivity">Sensitivity</label><strong id="sensitivityValue">30</strong></div>
+              <input id="sensitivity" type="range" min="8" max="80" value="30">
+              <p class="helper">Lower values detect smaller changes but may increase false positives.</p>
+            </div>
+            <div class="setting">
+              <div class="setting-label"><label for="minArea">Minimum region size</label><strong id="minAreaValue">0.25%</strong></div>
+              <input id="minArea" type="range" min="5" max="100" value="25">
+              <p class="helper">Filters tiny regions caused by noise, leaves and sensor movement.</p>
+            </div>
+            <div class="setting toggle-setting"><label for="showMotion">Show motion overlay</label><input id="showMotion" type="checkbox" checked></div>
+            <div class="setting toggle-setting"><label for="showMasks">Show exclusion masks</label><input id="showMasks" type="checkbox" checked></div>
+            <button id="clearMasks" class="button secondary full">Clear masks</button>
+          </div>
+          <div class="card status-card">
+            <div class="card-heading"><div><p class="eyebrow">SYSTEM STATUS</p><h3>Capabilities</h3></div></div>
+            <div class="capability"><span>Camera access</span><strong id="cameraCapability" class="neutral">Not started</strong></div>
+            <div class="capability"><span>Motion tracker</span><strong class="good">Ready</strong></div>
+            <div class="capability"><span>Bird detector model</span><strong class="warn">Not installed</strong></div>
+            <div class="capability"><span>Species classifier</span><strong class="warn">Not installed</strong></div>
+          </div>
+        </aside>
+      </div>
+      <div class="card tracks-card">
+        <div class="card-heading"><div><p class="eyebrow">CURRENT OBSERVATIONS</p><h3>Active tracks</h3></div><span class="muted small">Motion is not species identification</span></div>
+        <div id="tracksList" class="empty-state">No active tracks. Start the camera and introduce movement into the frame.</div>
+      </div>
+    </section>
+
+    <section id="libraryPanel" class="panel">
+      <div class="section-heading">
+        <div><p class="eyebrow">LOCAL DATASET</p><h2>Bird image library</h2><p class="muted">Images and labels are stored in this browser on this device using IndexedDB.</p></div>
+        <button id="exportCsv" class="button primary" disabled>Export CSV</button>
+      </div>
+      <div class="library-metrics">
+        <div class="metric-card"><span class="metric-label">Images</span><strong id="imageTotal">0</strong></div>
+        <div class="metric-card"><span class="metric-label">Species labels</span><strong id="speciesTotal">0</strong></div>
+        <div class="metric-card"><span class="metric-label">Annotated boxes</span><strong id="boxTotal">0</strong></div>
+        <div class="metric-card"><span class="metric-label">Duplicates skipped</span><strong id="duplicateTotal">0</strong></div>
+      </div>
+      <div class="card import-card">
+        <div class="card-heading"><div><p class="eyebrow">ADD PHOTOS</p><h3>Import dataset images</h3></div></div>
+        <p class="muted">Choose individual images or a folder organised into species subfolders. Folder names become starting labels only. Check them yourself; the app will not invent identifications.</p>
+        <div class="import-actions">
+          <label class="button primary file-button">Import images<input id="imagePicker" type="file" accept="image/*" multiple></label>
+          <label class="button secondary file-button">Import species folder<input id="folderPicker" type="file" accept="image/*" webkitdirectory directory multiple></label>
+          <button id="clearLibrary" class="button danger-outline">Clear library</button>
+        </div>
+        <p id="importStatus" class="helper" role="status">Your library is empty.</p>
+      </div>
+      <div class="library-toolbar">
+        <input id="librarySearch" class="search-input" type="search" placeholder="Search filename or species label">
+        <select id="splitFilter" class="select-input" aria-label="Filter by dataset split">
+          <option value="all">All splits</option><option value="unassigned">Unassigned</option><option value="train">Train</option><option value="validation">Validation</option><option value="test">Test</option>
+        </select>
+      </div>
+      <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
+    </section>
+
+    <section id="diagnosticsPanel" class="panel">
+      <div class="section-heading"><div><p class="eyebrow">DEVELOPER CONSOLE</p><h2>Diagnostics</h2><p class="muted">Timestamped events and errors. No remote telemetry is sent.</p></div><button id="clearLogs" class="button secondary">Clear log</button></div>
+      <div class="diagnostic-summary">
+        <div class="metric-card"><span class="metric-label">Session events</span><strong id="logCount">0</strong></div>
+        <div class="metric-card"><span class="metric-label">Runtime</span><strong id="runtimeLabel">Browser</strong></div>
+        <div class="metric-card"><span class="metric-label">Storage</span><strong id="storageLabel">Checking…</strong></div>
+      </div>
+      <div class="card console-card"><div class="console-top"><span><i></i> WILDLIFE-VISION / CONSOLE</span><button id="copyLogs" class="button tiny secondary">Copy log</button></div><div id="consoleOutput" class="console-output" aria-live="polite"></div></div>
+      <p class="helper">Privacy note: camera frames are processed locally in the page. Imported images are saved to this browser's local database. Clearing website data or switching browsers can remove them, so export your manifest periodically.</p>
+    </section>
+  </main>
+
+  <dialog id="editDialog" class="edit-dialog">
+    <form method="dialog" id="editForm">
+      <div class="dialog-heading"><div><p class="eyebrow">DATASET REVIEW</p><h2>Edit image record</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <img id="editPreview" class="edit-preview" alt="Selected dataset image">
+      <label class="form-label" for="editLabel">Species label</label><input id="editLabel" class="text-input" maxlength="120" placeholder="e.g. Australian magpie">
+      <label class="form-label" for="editSplit">Dataset split</label><select id="editSplit" class="select-input"><option value="unassigned">Unassigned</option><option value="train">Train</option><option value="validation">Validation</option><option value="test">Test</option></select>
+      <p class="helper">Labels are manually supplied. This browser app does not train a machine-learning model.</p>
+      <div class="dialog-actions"><button value="cancel" class="button secondary">Cancel</button><button id="saveRecord" value="save" class="button primary">Save changes</button></div>
+    </form>
+  </dialog>
+  <footer><span>WILDLIFE VISION</span><span>LOCAL-FIRST · EXPERIMENTAL MOTION TRACKING</span></footer>
+  <script src="./app.js" defer></script>
+</body>
+</html>

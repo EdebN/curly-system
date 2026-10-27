@@ -6,7 +6,7 @@
   const state = {
     stream: null, track: null, cameraRunning: false, raf: 0, lastFrame: null,
     frameWidth: 0, frameHeight: 0, sensitivity: 30, minArea: 25, zoom: 1,
-    cssZoom: 1, fullscreenFallback: false, masks: [], drawingMask: false, maskStart: null, maskDraft: null,
+    cssZoom: 1, fullscreenFallback: false, hardwareZoomMax: 1, masks: [], drawingMask: false, maskStart: null, maskDraft: null,
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
     objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
@@ -168,39 +168,42 @@
       return;
     }
     const caps = state.track.getCapabilities();
-    if (caps.zoom) {
-      const min = Math.max(1, Number(caps.zoom.min) || 1);
-      const max = Math.max(min, Math.min(6, Number(caps.zoom.max) || 3));
-      $('zoomSlider').min = String(min);
-      $('zoomSlider').max = String(max);
-      $('fullscreenZoomSlider').min = String(min);
-      $('fullscreenZoomSlider').max = String(max);
-      log('Hardware zoom supported: ' + min + '× to ' + max + '×.');
+    state.hardwareZoomMax = caps.zoom ? Math.max(1, Number(caps.zoom.max) || 1) : 1;
+    ['zoomSlider', 'fullscreenZoomSlider'].forEach((id) => {
+      $(id).min = '1';
+      $(id).max = '6';
+    });
+    if (state.hardwareZoomMax > 1) {
+      log('Hybrid zoom ready: hardware zoom up to ' + state.hardwareZoomMax.toFixed(1) + '×, digital crop only beyond that.');
     } else {
-      log('Hardware zoom is not available in this browser/camera; using visual crop zoom.', 'warn');
+      log('Hardware zoom unavailable; digital crop is the only available zoom.', 'warn');
     }
   }
 
   async function setZoom(value) {
-    state.zoom = Number(value);
+    state.zoom = Math.max(1, Math.min(6, Number(value) || 1));
     $('zoomValue').textContent = state.zoom.toFixed(1) + '×';
     $('fullscreenZoomValue').textContent = state.zoom.toFixed(1) + '×';
     $('zoomSlider').value = String(state.zoom);
     $('fullscreenZoomSlider').value = String(state.zoom);
-    let applied = false;
-    if (state.track && state.track.getCapabilities && state.track.getCapabilities().zoom && state.track.applyConstraints) {
+    const hardwareTarget = Math.min(state.zoom, Math.max(1, state.hardwareZoomMax || 1));
+    let hardwareApplied = false;
+    if (state.track && hardwareTarget > 1 && state.track.applyConstraints) {
       try {
-        await state.track.applyConstraints({ advanced: [{ zoom: state.zoom }] });
-        applied = true;
+        await state.track.applyConstraints({ advanced: [{ zoom: hardwareTarget }] });
+        hardwareApplied = true;
       } catch (error) {
-        log('Hardware zoom adjustment failed; using visual zoom: ' + error.message, 'warn');
+        state.hardwareZoomMax = 1;
+        log('Hardware zoom unavailable at runtime; digital crop will cover the full zoom range.', 'warn');
       }
     }
-    state.cssZoom = applied ? 1 : state.zoom;
+    const actualHardware = hardwareApplied ? hardwareTarget : 1;
+    state.cssZoom = Math.max(1, state.zoom / actualHardware);
     video.style.transform = 'scale(' + state.cssZoom + ')';
     canvas.style.transform = 'scale(' + state.cssZoom + ')';
     canvas.style.transformOrigin = 'center center';
-    log('Zoom set to ' + state.zoom.toFixed(1) + '×' + (applied ? ' (camera hardware).' : ' (visual crop).'));
+    const digitalUsed = state.cssZoom > 1.001;
+    log('Zoom set to ' + state.zoom.toFixed(1) + '×' + (digitalUsed ? ' (hardware limit reached; digital crop ' + state.cssZoom.toFixed(1) + '×).' : hardwareApplied ? ' (camera hardware).' : ' (1× camera, no digital crop).'));
   }
   $('zoomSlider').addEventListener('input', (event) => setZoom(event.target.value));
   $('fullscreenZoomSlider').addEventListener('input', (event) => setZoom(event.target.value));
@@ -209,6 +212,7 @@
   $('fullscreenZoomOut').addEventListener('click', () => changeZoom(-0.2));
   $('fullscreenZoomIn').addEventListener('click', () => changeZoom(0.2));
   $('fullscreenToggle').addEventListener('click', toggleCameraFullscreen);
+  $('fullscreenToggleOutside').addEventListener('click', toggleCameraFullscreen);
   document.addEventListener('fullscreenchange', syncFullscreenState);
   document.addEventListener('webkitfullscreenchange', syncFullscreenState);
 
@@ -258,6 +262,9 @@
     document.body.classList.toggle('camera-fullscreen-open', active && state.fullscreenFallback);
     $('fullscreenToggle').textContent = active ? 'EXIT FULLSCREEN' : 'FULLSCREEN';
     $('fullscreenToggle').setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
+    $('fullscreenToggleOutside').textContent = active ? 'Exit fullscreen' : 'Enter fullscreen';
+    $('fullscreenToggleOutside').setAttribute('aria-label', active ? 'Exit camera fullscreen' : 'Enter camera fullscreen');
+    $('fullscreenToggleOutside').classList.toggle('hidden', active);
   }
 
   function sizeCanvases() {

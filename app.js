@@ -355,7 +355,12 @@
     try {
       const threshold = state.aiThreshold;
       const predictions = await state.detectorModel.detect(video, 10, threshold);
-      const birds = predictions.filter((item) => item.class === 'bird' && item.score >= threshold);
+      const birds = predictions.filter((item) => {
+        if (item.class !== 'bird' || item.score < threshold) return false;
+        const centerX = (item.bbox[0] + item.bbox[2] / 2) / (video.videoWidth || 1);
+        const centerY = (item.bbox[1] + item.bbox[3] / 2) / (video.videoHeight || 1);
+        return !isMasked(centerX, centerY);
+      });
       const detections = [];
       for (const prediction of birds.slice(0, 4)) {
         let match = { label: 'Bird', similarity: 0 };

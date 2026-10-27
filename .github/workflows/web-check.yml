@@ -1,0 +1,23 @@
+name: Web app checks
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check JavaScript syntax
+        run: node --check app.js
+      - name: Check required web assets
+        run: |
+          test -f index.html
+          test -f styles.css
+          test -f app.js
+          grep -q 'styles.css' index.html
+          grep -q 'app.js' index.html
+          echo "Required web assets are present."

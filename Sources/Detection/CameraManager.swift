@@ -57,8 +57,12 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
     }
 
     func resetTracking() {
-        tracker.reset()
-        DispatchQueue.main.async { self.detections = [] }
+        // The tracker is owned by the vision queue. Reset it there to avoid
+        // racing an in-flight camera frame.
+        visionQueue.async {
+            self.tracker.reset()
+            DispatchQueue.main.async { self.detections = [] }
+        }
     }
 
     private func configureAndStart() {

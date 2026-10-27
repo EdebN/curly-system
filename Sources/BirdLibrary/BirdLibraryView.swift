@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct BirdLibraryView: View {
     @StateObject private var store = BirdDatasetStore()
     @State private var showFolderPicker = false
+    @State private var showImagePicker = false
     @State private var showExportShare = false
     @State private var exportURL: URL?
     @State private var selectedRecord: BirdImageRecord?
@@ -22,15 +23,19 @@ struct BirdLibraryView: View {
                     }
                     Text(store.status).font(.caption).foregroundStyle(.secondary)
                     HStack {
-                        Button { showFolderPicker = true } label: {
-                            Label(store.isImporting ? "Importing…" : "Import species folder", systemImage: "folder.badge.plus")
+                        Button { showImagePicker = true } label: {
+                            Label("Import images", systemImage: "photo.badge.plus")
                         }
                         .buttonStyle(.borderedProminent).disabled(store.isImporting)
+                        Button { showFolderPicker = true } label: {
+                            Label("Import species folder", systemImage: "folder.badge.plus")
+                        }
+                        .buttonStyle(.bordered).disabled(store.isImporting)
                         Button { exportURL = store.exportManifest(); showExportShare = exportURL != nil } label: {
                             Label("Export CSV", systemImage: "square.and.arrow.up")
                         }.buttonStyle(.bordered).disabled(store.records.isEmpty)
                     }
-                    Text("Choose the top-level folder containing one folder per species. Images are copied into app storage for offline use. Labels come from each image’s parent folder, so review them before training.")
+                    Text("Import individual photos for manual labelling, or choose a folder containing one subfolder per species. Images are copied into app storage for offline use. Folder names are starting labels, not verified identifications.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 .padding()
@@ -65,6 +70,14 @@ struct BirdLibraryView: View {
                     guard let url = urls.first else { return }
                     Task { await store.importFolder(url) }
                 case .failure(let error): store.status = "Folder selection failed: \(error.localizedDescription)"
+                }
+            }
+            .fileImporter(isPresented: $showImagePicker, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let urls):
+                    Task { await store.importImages(urls) }
+                case .failure(let error):
+                    store.status = "Image selection failed: \\(error.localizedDescription)"
                 }
             }
             .sheet(item: $selectedRecord) { record in DatasetRecordEditor(record: record, store: store) }

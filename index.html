@@ -84,6 +84,15 @@
             <div class="setting toggle-setting"><label for="showMasks">Show exclusion masks</label><input id="showMasks" type="checkbox" checked></div>
             <button id="clearMasks" class="button secondary full">Clear masks</button>
           </div>
+          <div class="card spatial-card">
+            <div class="card-heading"><div><p class="eyebrow">SPATIAL AWARENESS</p><h3>Scene understanding</h3></div></div>
+            <div class="capability"><span>Tracked objects</span><strong id="spatialCount" class="good">0</strong></div>
+            <p id="sceneSummary" class="scene-summary">Start detection to map object positions.</p>
+            <div class="setting toggle-setting"><label for="showSpatialGrid">Thirds grid and zones</label><input id="showSpatialGrid" type="checkbox" checked></div>
+            <div class="setting toggle-setting"><label for="showTrails">Movement trails</label><input id="showTrails" type="checkbox" checked></div>
+            <div class="setting toggle-setting"><label for="showCoordinates">Position and movement labels</label><input id="showCoordinates" type="checkbox" checked></div>
+            <p class="helper">Positions and speed are relative to the video frame. Camera movement can look like object movement; no real-world distance is inferred.</p>
+          </div>
           <div class="card">
             <div class="card-heading"><div><p class="eyebrow">OPTIONAL MOTION TRACKER</p><h3>Motion settings</h3></div></div>
             <div class="setting">

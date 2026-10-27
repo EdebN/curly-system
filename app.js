@@ -259,6 +259,19 @@
     const tensor = state.featureModel.infer(source, true);
     try {
       const values = await tensor.data();
+      const shape = tensor.shape;
+      // Pool spatial activations into a compact feature vector so larger libraries
+      // do not consume hundreds of megabytes on an iPad.
+      if (shape.length === 4 && shape[0] === 1) {
+        const height = shape[1], width = shape[2], channels = shape[3];
+        const pooled = new Array(channels).fill(0);
+        const positions = height * width;
+        for (let p = 0; p < positions; p++) {
+          const offset = p * channels;
+          for (let c = 0; c < channels; c++) pooled[c] += values[offset + c] / positions;
+        }
+        return pooled;
+      }
       return Array.from(values);
     } finally {
       tensor.dispose();

@@ -18,7 +18,7 @@ let package = Package(
             appIcon: .placeholder(icon: .binoculars),
             accentColor: .presetColor(.green),
             supportedDeviceFamilies: [.pad, .phone],
-            supportedInterfaceOrientations: [.portrait, .landscapeLeft, .landscapeRight],
+            supportedInterfaceOrientations: [.portrait, .portraitUpsideDown, .landscapeLeft, .landscapeRight],
             capabilities: [
                 .camera(purposeString: "Wildlife Vision uses the camera to detect birds locally on this device.")
             ]

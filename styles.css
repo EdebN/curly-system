@@ -3,3 +3,11 @@
 .mode-switch{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:12px;padding:14px}.mode-switch strong{font-size:12px}.mode-buttons,.library-heading-actions{display:flex;gap:8px;flex-wrap:wrap}.library-heading-actions{justify-content:flex-end}.camera-column>.helper{margin-top:9px}.track-item{min-width:0}.track-item strong{text-transform:none;overflow-wrap:anywhere}.track-item small{line-height:1.5}.button:disabled{opacity:.45}@media(max-width:650px){.mode-switch{align-items:flex-start;flex-direction:column}.mode-buttons{width:100%}.mode-buttons .button{flex:1}.library-heading-actions{width:100%;justify-content:flex-start}.section-heading:has(.library-heading-actions){flex-direction:column}}
 
 .rf-file-button{font-size:.78rem;max-width:190px;white-space:normal;text-align:center}.rf-file-button input{max-width:1px;max-height:1px;overflow:hidden;position:absolute;opacity:0;pointer-events:none}
+
+.rf-setup{display:grid;gap:10px;margin-top:12px;padding:15px}
+.rf-setup>div:first-child strong{font-size:13px}
+.rf-setup .helper{margin:6px 0 0;line-height:1.55}
+.rf-label-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.rf-label-row .helper{overflow-wrap:anywhere}
+.rf-file-button{font-size:.78rem;max-width:220px;white-space:normal;text-align:center;position:relative;overflow:hidden}
+.rf-file-button input{max-width:1px;max-height:1px;overflow:hidden;position:absolute;opacity:0;pointer-events:none}

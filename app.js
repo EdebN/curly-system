@@ -519,25 +519,61 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (state.showMasks) {
       state.masks.forEach((mask) => {
-        ctx.fillStyle = 'rgba(255,174,74,.18)'; ctx.strokeStyle = '#ffbd6b'; ctx.lineWidth = 2;
-        ctx.fillRect(mask.x * canvas.width, mask.y * canvas.height, mask.w * canvas.width, mask.h * canvas.height);
-        ctx.strokeRect(mask.x * canvas.width, mask.y * canvas.height, mask.w * canvas.width, mask.h * canvas.height);
+        const mx = mask.x * canvas.width, my = mask.y * canvas.height;
+        const mw = mask.w * canvas.width, mh = mask.h * canvas.height;
+        ctx.fillStyle = 'rgba(255,174,74,.15)';
+        ctx.strokeStyle = '#ffbd6b'; ctx.lineWidth = 2;
+        ctx.setLineDash([7, 4]);
+        ctx.fillRect(mx, my, mw, mh); ctx.strokeRect(mx, my, mw, mh);
+        ctx.setLineDash([]);
       });
     }
     if (!state.showMotion) return;
     const sx = canvas.width / (video.videoWidth || canvas.width);
     const sy = canvas.height / (video.videoHeight || canvas.height);
+    const cw = canvas.width, ch = canvas.height;
     for (const item of state.aiDetections) {
       const box = item.prediction.bbox;
-      const x = box[0] * sx, y = box[1] * sy, w = box[2] * sx, h = box[3] * sy;
-      ctx.strokeStyle = '#a7f36c'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
+      const x = Math.max(0, Math.min(cw, box[0] * sx));
+      const y = Math.max(0, Math.min(ch, box[1] * sy));
+      const w = Math.max(0, Math.min(cw - x, box[2] * sx));
+      const h = Math.max(0, Math.min(ch - y, box[3] * sy));
       const pct = Math.round(item.prediction.score * 100);
-      const label = item.match.label === 'Unmatched' ? String(item.prediction.class || 'OBJECT').toUpperCase() : item.match.label.toUpperCase();
-      const text = label + ' ' + pct + '%';
-      ctx.font = 'bold 11px ui-monospace, monospace';
-      const labelWidth = ctx.measureText(text).width + 12;
-      ctx.fillStyle = '#a7f36c'; ctx.fillRect(x, Math.max(0, y - 21), labelWidth, 21);
-      ctx.fillStyle = '#10200d'; ctx.fillText(text, x + 6, Math.max(13, y - 7));
+      const rawLabel = item.match.label === 'Unmatched' ? String(item.prediction.class || 'OBJECT') : item.match.label;
+      const label = rawLabel.toUpperCase();
+      const text = label + '  ' + pct + '%';
+      ctx.save();
+      // A dark halo keeps the box legible against both bright sky and dark foliage.
+      ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.72)'; ctx.strokeRect(x, y, w, h);
+      ctx.lineWidth = 2.5; ctx.strokeStyle = '#b8ff5c'; ctx.strokeRect(x, y, w, h);
+      const corner = Math.min(13, Math.max(5, Math.min(w, h) * .16));
+      ctx.lineWidth = 4; ctx.strokeStyle = '#eaffb8';
+      ctx.beginPath();
+      ctx.moveTo(x, y + corner); ctx.lineTo(x, y); ctx.lineTo(x + corner, y);
+      ctx.moveTo(x + w - corner, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + corner);
+      ctx.moveTo(x, y + h - corner); ctx.lineTo(x, y + h); ctx.lineTo(x + corner, y + h);
+      ctx.moveTo(x + w - corner, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - corner);
+      ctx.stroke();
+      ctx.font = '700 12px ui-monospace, SFMono-Regular, Menlo, monospace';
+      const labelWidth = Math.min(cw, ctx.measureText(text).width + 18);
+      const labelHeight = 25;
+      // Prefer above the box; flip inside/below when the box touches the top.
+      const labelX = Math.max(0, Math.min(cw - labelWidth, x));
+      const labelY = y >= labelHeight + 4 ? y - labelHeight - 2 : Math.min(ch - labelHeight, y + 2);
+      ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 8;
+      ctx.fillStyle = '#b8ff5c';
+      ctx.beginPath();
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 5);
+      else ctx.rect(labelX, labelY, labelWidth, labelHeight);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#14200b';
+      ctx.textBaseline = 'middle';
+      const availableTextWidth = Math.max(0, labelWidth - 12);
+      let shown = text;
+      while (ctx.measureText(shown).width > availableTextWidth && shown.length > 4) shown = shown.slice(0, -2) + '…';
+      ctx.fillText(shown, labelX + 7, labelY + labelHeight / 2, availableTextWidth);
+      ctx.restore();
     }
   }
 
@@ -720,6 +756,7 @@
     try {
       const parsed = JSON.parse(await file.text());
       state.rfLabels = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.names) ? parsed.names : Object.values(parsed));
+      $('rfLabelsName').textContent = file.name + ' · ' + state.rfLabels.length + ' labels';
       $('rfStatus').textContent = 'Loaded ' + state.rfLabels.length + ' class labels from ' + file.name + '.';
       log('Loaded RF-DETR labels: ' + state.rfLabels.length + '.');
     } catch (error) { $('rfStatus').textContent = 'Labels JSON invalid: ' + error.message; log('RF-DETR labels parse failed: ' + error.message, 'error'); }

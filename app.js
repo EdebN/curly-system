@@ -10,7 +10,7 @@
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
     objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
-    aiBusy: false, aiLastRun: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false
+    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false
   };
 
   const video = $('cameraVideo');
@@ -326,26 +326,46 @@
     }
   }
 
-  async function classifyBirdCrop(prediction) {
-    if (!state.trainingReady || !state.featureModel) return { label: 'Bird', similarity: 0 };
-    const box = prediction.bbox;
+  async function classifyCropBox(box) {
+    if (!state.trainingReady || !state.featureModel) return { label: 'Unmatched', similarity: 0 };
     const crop = document.createElement('canvas');
-    const side = 224;
-    crop.width = side; crop.height = side;
+    crop.width = 224; crop.height = 224;
     const cropCtx = crop.getContext('2d');
     const x = Math.max(0, Math.floor(box[0]));
     const y = Math.max(0, Math.floor(box[1]));
     const w = Math.max(1, Math.min(video.videoWidth - x, Math.floor(box[2])));
     const h = Math.max(1, Math.min(video.videoHeight - y, Math.floor(box[3])));
-    cropCtx.fillStyle = '#fff'; cropCtx.fillRect(0, 0, side, side);
-    cropCtx.drawImage(video, x, y, w, h, 0, 0, side, side);
+    cropCtx.fillStyle = '#fff'; cropCtx.fillRect(0, 0, 224, 224);
+    cropCtx.drawImage(video, x, y, w, h, 0, 0, 224, 224);
     const features = await extractFeatures(crop);
     let best = null;
     for (const sample of state.trainingSamples) {
       const similarity = cosineSimilarity(features, sample.features);
       if (!best || similarity > best.similarity) best = { label: sample.label, similarity };
     }
-    return best && best.similarity >= 0.68 ? best : { label: 'Unmatched bird', similarity: best ? best.similarity : 0 };
+    return best && best.similarity >= 0.62 ? best : { label: 'Unmatched', similarity: best ? best.similarity : 0 };
+  }
+
+  async function scanForLearnedObjects() {
+    if (!state.trainingReady || !state.featureModel || Date.now() - state.lastLearnedScan < 2200) return [];
+    state.lastLearnedScan = Date.now();
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return [];
+    const side = Math.floor(Math.min(vw, vh) * 0.52);
+    const xs = [0, Math.max(0, Math.floor((vw - side) / 2)), Math.max(0, vw - side)];
+    const ys = [0, Math.max(0, vh - side)];
+    const candidates = [];
+    for (const y of ys) for (const x of xs) candidates.push([x, y, Math.min(side, vw - x), Math.min(side, vh - y)]);
+    let best = null;
+    for (const box of candidates) {
+      const match = await classifyCropBox(box);
+      if (match.label !== 'Unmatched' && (!best || match.similarity > best.match.similarity)) best = { box, match };
+    }
+    if (!best) return [];
+    return [{
+      prediction: { bbox: best.box, score: best.match.similarity, class: best.match.label, learned: true },
+      match: best.match
+    }];
   }
 
   async function runAIDetection() {
@@ -355,21 +375,38 @@
     try {
       const threshold = state.aiThreshold;
       const predictions = await state.detectorModel.detect(video, 10, threshold);
-      const birds = predictions.filter((item) => {
-        if (item.class !== 'bird' || item.score < threshold) return false;
-        const centerX = (item.bbox[0] + item.bbox[2] / 2) / (video.videoWidth || 1);
-        const centerY = (item.bbox[1] + item.bbox[3] / 2) / (video.videoHeight || 1);
-        return !isMasked(centerX, centerY);
-      });
+      const candidates = predictions.filter((item) => item.score >= threshold).map((item) => ({
+        prediction: item,
+        centerX: (item.bbox[0] + item.bbox[2] / 2) / (video.videoWidth || 1),
+        centerY: (item.bbox[1] + item.bbox[3] / 2) / (video.videoHeight || 1)
+      })).filter((item) => !isMasked(item.centerX, item.centerY));
       const detections = [];
-      for (const prediction of birds.slice(0, 4)) {
-        let match = { label: 'Bird', similarity: 0 };
+      for (const candidate of candidates.slice(0, 4)) {
+        let match = { label: candidate.prediction.class, similarity: 0 };
         if (state.trainingReady) {
-          try { match = await classifyBirdCrop(prediction); }
-          catch (error) { log('Species matching failed: ' + error.message, 'warn'); }
+          try {
+            const learned = await classifyCropBox(candidate.prediction.bbox);
+            if (learned.label !== 'Unmatched') match = learned;
+          } catch (error) { log('Species matching failed: ' + error.message, 'warn'); }
         }
-        detections.push({ prediction, match });
+        detections.push({ prediction: candidate.prediction, match });
       }
+      if (state.trainingReady && Date.now() - state.lastLearnedScan >= 2200) {
+        try {
+          const learnedHits = await scanForLearnedObjects();
+          if (learnedHits.length) {
+            const hit = learnedHits[0];
+            const box = hit.prediction.bbox;
+            const overlaps = detections.some((item) => {
+              const b = item.prediction.bbox;
+              const cx = (box[0] + box[2] / 2), cy = (box[1] + box[3] / 2);
+              return cx >= b[0] && cx <= b[0] + b[2] && cy >= b[1] && cy <= b[1] + b[3];
+            });
+            if (!overlaps) detections.push(hit);
+          }
+        } catch (error) { log('Learned object scan failed: ' + error.message, 'warn'); }
+      }
+      detections.sort((a, b) => (b.match.similarity || b.prediction.score) - (a.match.similarity || a.prediction.score));
       state.aiDetections = detections;
       drawAIDetections();
       $('birdCount').textContent = String(detections.length);
@@ -405,7 +442,7 @@
       const x = box[0] * sx, y = box[1] * sy, w = box[2] * sx, h = box[3] * sy;
       ctx.strokeStyle = '#a7f36c'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
       const pct = Math.round(item.prediction.score * 100);
-      const label = item.match.label === 'Bird' ? 'BIRD' : item.match.label.toUpperCase();
+      const label = item.match.label === 'Unmatched' ? String(item.prediction.class || 'OBJECT').toUpperCase() : item.match.label.toUpperCase();
       const text = label + ' ' + pct + '%';
       ctx.font = 'bold 11px ui-monospace, monospace';
       const labelWidth = ctx.measureText(text).width + 12;

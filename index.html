@@ -117,10 +117,11 @@
       </div>
       <div class="card import-card">
         <div class="card-heading"><div><p class="eyebrow">ADD PHOTOS</p><h3>Import dataset images</h3></div></div>
-        <p class="muted">Choose individual images or a folder organised into species subfolders. Folder names become starting labels only. Check them yourself; the app will not invent identifications.</p>
+        <p class="muted">Best on iPad: put each species in its own named folder, ZIP the parent folder in the Files app, then import the ZIP here. Folder names become starting labels. You can also select individual photos.</p>
         <div class="import-actions">
-          <label class="button primary file-button">Import images<input id="imagePicker" type="file" accept="image/*" multiple></label>
-          <label class="button secondary file-button">Import species folder<input id="folderPicker" type="file" accept="image/*" webkitdirectory directory multiple></label>
+          <label class="button primary file-button">Import species ZIP<input id="zipPicker" type="file" accept=".zip,application/zip,application/x-zip-compressed"></label>
+          <label class="button secondary file-button">Import images<input id="imagePicker" type="file" accept="image/*,.heic,.heif,.avif,.tif,.tiff,.bmp" multiple></label>
+          <label class="button secondary file-button">Import species folder (supported browsers)<input id="folderPicker" type="file" accept="image/*,.heic,.heif,.avif,.tif,.tiff,.bmp" webkitdirectory directory multiple></label>
           <button id="clearLibrary" class="button danger-outline">Clear library</button>
         </div>
         <p id="importStatus" class="helper" role="status">Your library is empty.</p>
@@ -157,6 +158,7 @@
     </form>
   </dialog>
   <footer><span>WILDLIFE VISION</span><span>LOCAL-FIRST · EXPERIMENTAL MOTION TRACKING</span></footer>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
   <script src="./app.js" defer></script>
 </body>
 </html>

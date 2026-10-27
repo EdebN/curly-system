@@ -104,6 +104,27 @@
     }
   }
 
+  function captureSnapshot() {
+    if (!state.cameraRunning || !video.videoWidth || !video.videoHeight) {
+      log('Snapshot unavailable: start the camera first.', 'warn');
+      return;
+    }
+    const output = document.createElement('canvas');
+    output.width = video.videoWidth; output.height = video.videoHeight;
+    const out = output.getContext('2d');
+    out.drawImage(video, 0, 0, output.width, output.height);
+    if (state.showMotion && canvas.width && canvas.height) out.drawImage(canvas, 0, 0, output.width, output.height);
+    output.toBlob((blob) => {
+      if (!blob) { log('Snapshot export failed: browser did not create an image.', 'error'); return; }
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
+      link.href = url;
+      link.download = 'wildlife-observation-' + new Date().toISOString().replace(/[:.]/g, '-') + '.png';
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+      log('Annotated observation snapshot exported.');
+    }, 'image/png');
+  }
+
   function stopCamera() {
     if (state.raf) cancelAnimationFrame(state.raf);
     state.raf = 0;
@@ -115,6 +136,7 @@
     state.lastFrame = null;
     state.tracks = [];
     state.aiDetections = [];
+    state.spatialTracks = [];
     $('birdCount').textContent = '0'; $('speciesMatchCount').textContent = '0';
     state.motionScore = 0;
     $('cameraPlaceholder').classList.remove('hidden');
@@ -171,6 +193,7 @@
     const scale = Math.min(1, maxWidth / video.videoWidth);
     const width = Math.max(160, Math.round(video.videoWidth * scale));
     const height = Math.round(video.videoHeight * width / video.videoWidth);
+    cameraStage.style.aspectRatio = video.videoWidth + ' / ' + video.videoHeight;
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width; canvas.height = height;
       scratch.width = width; scratch.height = height;
@@ -293,6 +316,7 @@
       detections.sort((a, b) => b.prediction.score - a.prediction.score);
       state.aiDetections = detections.slice(0, 30); updateSpatialTracks(state.aiDetections); drawAIDetections();
       $('birdCount').textContent = String(state.aiDetections.length); $('speciesMatchCount').textContent = '0';
+      renderTracks();
       $('aiStatus').textContent = 'RF-DETR inference completed. Verify the export’s input normalisation, box format and score format if detections look wrong.';
     } catch (error) {
       $('rfStatus').textContent = 'RF-DETR inference error: ' + error.message;
@@ -879,6 +903,7 @@
     state.aiThreshold = Number(event.target.value) / 100;
     $('aiThresholdValue').textContent = event.target.value + '%';
   });
+  $('captureSnapshot').addEventListener('click', captureSnapshot);
   $('startCamera').addEventListener('click', startCamera);
   $('stopCamera').addEventListener('click', stopCamera);
   $('resetTracks').addEventListener('click', () => {

@@ -10,7 +10,7 @@
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
     objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
-    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, rfSession: null, rfLabels: [], rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded"
+    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, rfSession: null, rfLabels: [], rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded", spatialTracks: [], nextSpatialId: 1, showSpatialGrid: true, showTrails: true, showCoordinates: true
   };
 
   const video = $('cameraVideo');
@@ -291,7 +291,7 @@
         detections.push({ prediction: { bbox: [x, y, w, h], score: bestScore, class: label }, match: { label, similarity: 0 } });
       }
       detections.sort((a, b) => b.prediction.score - a.prediction.score);
-      state.aiDetections = detections.slice(0, 30); drawAIDetections();
+      state.aiDetections = detections.slice(0, 30); updateSpatialTracks(state.aiDetections); drawAIDetections();
       $('birdCount').textContent = String(state.aiDetections.length); $('speciesMatchCount').textContent = '0';
       $('aiStatus').textContent = 'RF-DETR inference completed. Verify the export’s input normalisation, box format and score format if detections look wrong.';
     } catch (error) {
@@ -498,6 +498,7 @@
       }
       detections.sort((a, b) => (b.match.similarity || b.prediction.score) - (a.match.similarity || a.prediction.score));
       state.aiDetections = detections;
+      updateSpatialTracks(detections);
       drawAIDetections();
       $('birdCount').textContent = String(detections.length);
       $('speciesMatchCount').textContent = String(detections.filter((item) => item.match.label !== 'Unmatched' && item.match.similarity > 0).length);
@@ -515,8 +516,95 @@
     }
   }
 
+  function updateSpatialTracks(detections) {
+    const now = performance.now();
+    state.spatialTracks.forEach((track) => { track.missed++; });
+    const claimed = new Set(), next = [];
+    for (const item of detections) {
+      const b = item.prediction.bbox;
+      const fw = video.videoWidth || 1, fh = video.videoHeight || 1;
+      const box = { x: b[0] / fw, y: b[1] / fh, w: b[2] / fw, h: b[3] / fh };
+      const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+      const label = item.match.label === 'Unmatched' ? (item.prediction.class || 'Object') : (item.match.label || item.prediction.class || 'Object');
+      let best = null, bestCost = Infinity;
+      for (const track of state.spatialTracks) {
+        if (claimed.has(track.id) || track.label !== label) continue;
+        const distance = Math.hypot(cx - track.cx, cy - track.cy);
+        const overlap = iou(box, track.box);
+        const cost = distance * 0.72 + (1 - overlap) * 0.28;
+        if ((overlap > 0.01 || distance < 0.14) && cost < bestCost) { best = track; bestCost = cost; }
+      }
+      if (!best) {
+        best = { id: state.nextSpatialId++, label, born: now, history: [], box, cx, cy, vx: 0, vy: 0, missed: 0 };
+        log('Spatial track #' + best.id + ' acquired: ' + label + '.');
+      } else {
+        const dt = Math.max(0.04, (now - (best.updatedAt || now - 40)) / 1000);
+        const rawVx = (cx - best.cx) / dt, rawVy = (cy - best.cy) / dt;
+        best.vx = best.vx * 0.55 + rawVx * 0.45;
+        best.vy = best.vy * 0.55 + rawVy * 0.45;
+      }
+      best.box = box; best.cx = cx; best.cy = cy; best.updatedAt = now; best.missed = 0; best.item = item;
+      best.history.push({ x: cx, y: cy, t: now });
+      if (best.history.length > 18) best.history.shift();
+      claimed.add(best.id); next.push(best);
+    }
+    for (const track of state.spatialTracks) {
+      if (track.missed > 0 && track.missed <= 8 && !next.some((item) => item.id === track.id)) next.push(track);
+    }
+    state.spatialTracks = next.filter((track) => track.missed <= 8);
+    const active = state.spatialTracks.filter((track) => track.missed === 0);
+    $('spatialCount').textContent = String(active.length);
+    $('sceneSummary').textContent = active.length ? active.map((track) => track.label + ' · ' + relativePosition(track.cx, track.cy)).slice(0, 3).join(' | ') : 'No tracked objects in view';
+  }
+
+  function relativePosition(x, y) {
+    const horizontal = x < 0.34 ? 'left' : x > 0.66 ? 'right' : 'centre';
+    const vertical = y < 0.34 ? 'upper' : y > 0.66 ? 'lower' : 'middle';
+    return vertical + ' ' + horizontal;
+  }
+
+  function movementLabel(track) {
+    const speed = Math.hypot(track.vx || 0, track.vy || 0);
+    if (speed < 0.025) return 'mostly still';
+    const horizontal = Math.abs(track.vx) > Math.abs(track.vy) * 0.65 ? (track.vx > 0 ? 'right' : 'left') : '';
+    const vertical = Math.abs(track.vy) > Math.abs(track.vx) * 0.65 ? (track.vy > 0 ? 'down' : 'up') : '';
+    const direction = [vertical, horizontal].filter(Boolean).join('-');
+    return direction + ' · ' + Math.round(speed * 100) + '% frame/s';
+  }
+
+  function drawSpatialOverlay() {
+    if (state.showSpatialGrid) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(185,255,128,.34)'; ctx.lineWidth = 1; ctx.setLineDash([4, 5]);
+      for (let i = 1; i < 3; i++) {
+        const x = canvas.width * i / 3, y = canvas.height * i / 3;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(225,255,205,.82)'; ctx.font = '9px ui-monospace, monospace';
+      ctx.fillText('UPPER LEFT', 5, 12); ctx.fillText('UPPER CENTRE', canvas.width / 3 + 5, 12); ctx.fillText('UPPER RIGHT', canvas.width * 2 / 3 + 5, 12);
+      ctx.restore();
+    }
+    if (state.showTrails) {
+      for (const track of state.spatialTracks) {
+        if (track.history.length < 2) continue;
+        ctx.save(); ctx.strokeStyle = 'rgba(184,255,92,.8)'; ctx.lineWidth = 2; ctx.beginPath();
+        track.history.forEach((point, index) => {
+          const x = point.x * canvas.width, y = point.y * canvas.height;
+          if (!index) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        const last = track.history[track.history.length - 1];
+        ctx.fillStyle = '#eaffb8'; ctx.beginPath(); ctx.arc(last.x * canvas.width, last.y * canvas.height, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
   function drawAIDetections() {
+    sizeCanvases();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawSpatialOverlay();
     if (state.showMasks) {
       state.masks.forEach((mask) => {
         const mx = mask.x * canvas.width, my = mask.y * canvas.height;
@@ -540,8 +628,11 @@
       const h = Math.max(0, Math.min(ch - y, box[3] * sy));
       const pct = Math.round(item.prediction.score * 100);
       const rawLabel = item.match.label === 'Unmatched' ? String(item.prediction.class || 'OBJECT') : item.match.label;
-      const label = rawLabel.toUpperCase();
-      const text = label + '  ' + pct + '%';
+      const spatial = state.spatialTracks.find((track) => track.missed === 0 && track.item === item);
+      const label = (spatial ? '#' + spatial.id + ' ' : '') + rawLabel.toUpperCase();
+      const place = spatial && state.showCoordinates ? relativePosition(spatial.cx, spatial.cy).toUpperCase() + ' · ' : '';
+      const motion = spatial && state.showCoordinates ? movementLabel(spatial) + ' · ' : '';
+      const text = label + '  ' + pct + '% · ' + place + motion;
       ctx.save();
       // A dark halo keeps the box legible against both bright sky and dark foliage.
       ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.72)'; ctx.strokeRect(x, y, w, h);
@@ -713,7 +804,7 @@
   function renderTracks() {
     const root = $('tracksList');
     root.replaceChildren();
-    if (state.detectionMode === 'ai') {
+    if (state.detectionMode === 'ai' || state.detectionMode === 'rfdetr') {
       if (!state.aiDetections.length) {
         root.className = 'empty-state';
         root.textContent = state.cameraRunning ? 'Waiting for AI detections. Birds must be visible and large enough for the model.' : 'Load the AI models and start the camera to detect birds.';
@@ -726,8 +817,10 @@
         const info = document.createElement('div');
         const title = document.createElement('strong'); title.textContent = item.match.label === 'Unmatched' ? (item.prediction.class || 'Object') + ' detected' : item.match.label;
         const detail = document.createElement('small');
+        const spatial = state.spatialTracks.find((track) => track.missed === 0 && track.item === item);
         detail.textContent = 'Detector ' + Math.round(item.prediction.score * 100) + '% confidence' +
-          (item.match.similarity ? ' · visual match ' + Math.round(item.match.similarity * 100) + '%' : '');
+          (item.match.similarity ? ' · visual match ' + Math.round(item.match.similarity * 100) + '%' : '') +
+          (spatial ? ' · ' + relativePosition(spatial.cx, spatial.cy) + ' · ' + movementLabel(spatial) : '');
         info.append(title, detail); card.append(number, info); root.append(card);
       });
       return;
@@ -789,7 +882,7 @@
   $('startCamera').addEventListener('click', startCamera);
   $('stopCamera').addEventListener('click', stopCamera);
   $('resetTracks').addEventListener('click', () => {
-    state.tracks = []; state.nextTrackId = 1; log('Tracking IDs reset.');
+    state.tracks = []; state.nextTrackId = 1; state.spatialTracks = []; state.nextSpatialId = 1; log('Motion and spatial tracking IDs reset.');
     drawOverlay([]); renderTracks();
   });
   $('sensitivity').addEventListener('input', (event) => {
@@ -798,7 +891,10 @@
   $('minArea').addEventListener('input', (event) => {
     state.minArea = Number(event.target.value); $('minAreaValue').textContent = (Number(event.target.value) / 100).toFixed(2) + '%';
   });
-  $('showMotion').addEventListener('change', (event) => { state.showMotion = event.target.checked; });
+  $('showMotion').addEventListener('change', (event) => { state.showMotion = event.target.checked; drawAIDetections(); });
+  $('showSpatialGrid').addEventListener('change', (event) => { state.showSpatialGrid = event.target.checked; drawAIDetections(); });
+  $('showTrails').addEventListener('change', (event) => { state.showTrails = event.target.checked; drawAIDetections(); });
+  $('showCoordinates').addEventListener('change', (event) => { state.showCoordinates = event.target.checked; drawAIDetections(); });
   $('showMasks').addEventListener('change', (event) => { state.showMasks = event.target.checked; });
   $('maskMode').addEventListener('click', () => {
     state.maskMode = !state.maskMode;

@@ -137,6 +137,7 @@
     state.tracks = [];
     state.aiDetections = [];
     state.spatialTracks = [];
+    $('spatialCount').textContent = '0'; $('sceneSummary').textContent = 'No tracked objects in view';
     $('birdCount').textContent = '0'; $('speciesMatchCount').textContent = '0';
     state.motionScore = 0;
     $('cameraPlaceholder').classList.remove('hidden');
@@ -916,10 +917,14 @@
   $('minArea').addEventListener('input', (event) => {
     state.minArea = Number(event.target.value); $('minAreaValue').textContent = (Number(event.target.value) / 100).toFixed(2) + '%';
   });
-  $('showMotion').addEventListener('change', (event) => { state.showMotion = event.target.checked; drawAIDetections(); });
-  $('showSpatialGrid').addEventListener('change', (event) => { state.showSpatialGrid = event.target.checked; drawAIDetections(); });
-  $('showTrails').addEventListener('change', (event) => { state.showTrails = event.target.checked; drawAIDetections(); });
-  $('showCoordinates').addEventListener('change', (event) => { state.showCoordinates = event.target.checked; drawAIDetections(); });
+  function redrawCurrentOverlay() {
+    if (state.detectionMode === 'motion') drawOverlay(state.tracks);
+    else drawAIDetections();
+  }
+  $('showMotion').addEventListener('change', (event) => { state.showMotion = event.target.checked; redrawCurrentOverlay(); });
+  $('showSpatialGrid').addEventListener('change', (event) => { state.showSpatialGrid = event.target.checked; redrawCurrentOverlay(); });
+  $('showTrails').addEventListener('change', (event) => { state.showTrails = event.target.checked; redrawCurrentOverlay(); });
+  $('showCoordinates').addEventListener('change', (event) => { state.showCoordinates = event.target.checked; redrawCurrentOverlay(); });
   $('showMasks').addEventListener('change', (event) => { state.showMasks = event.target.checked; });
   $('maskMode').addEventListener('click', () => {
     state.maskMode = !state.maskMode;

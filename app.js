@@ -114,6 +114,8 @@
     video.srcObject = null;
     state.lastFrame = null;
     state.tracks = [];
+    state.aiDetections = [];
+    $('birdCount').textContent = '0'; $('speciesMatchCount').textContent = '0';
     state.motionScore = 0;
     $('cameraPlaceholder').classList.remove('hidden');
     $('startCamera').disabled = false;
@@ -529,6 +531,26 @@
 
   function renderTracks() {
     const root = $('tracksList');
+    root.replaceChildren();
+    if (state.detectionMode === 'ai') {
+      if (!state.aiDetections.length) {
+        root.className = 'empty-state';
+        root.textContent = state.cameraRunning ? 'Waiting for AI detections. Birds must be visible and large enough for the model.' : 'Load the AI models and start the camera to detect birds.';
+        return;
+      }
+      root.className = 'track-list';
+      state.aiDetections.forEach((item, index) => {
+        const card = document.createElement('div'); card.className = 'track-item';
+        const number = document.createElement('span'); number.className = 'track-number'; number.textContent = String(index + 1);
+        const info = document.createElement('div');
+        const title = document.createElement('strong'); title.textContent = item.match.label === 'Bird' ? 'Bird detected' : item.match.label;
+        const detail = document.createElement('small');
+        detail.textContent = 'Detector ' + Math.round(item.prediction.score * 100) + '% confidence' +
+          (item.match.similarity ? ' · visual match ' + Math.round(item.match.similarity * 100) + '%' : '');
+        info.append(title, detail); card.append(number, info); root.append(card);
+      });
+      return;
+    }
     const active = state.tracks.filter((track) => track.missed <= 5);
     if (!active.length) {
       root.className = 'empty-state';
@@ -536,7 +558,6 @@
       return;
     }
     root.className = 'track-list';
-    root.replaceChildren();
     active.forEach((track) => {
       const item = document.createElement('div'); item.className = 'track-item';
       const number = document.createElement('span'); number.className = 'track-number'; number.textContent = '#' + track.id;
@@ -770,6 +791,7 @@
       return matches && (split === 'all' || record.split === split);
     });
     const species = new Set(state.records.map((record) => record.speciesLabel));
+    $('trainSpecies').disabled = !state.records.some((record) => record.speciesLabel && !['Unlabelled', 'Unknown'].includes(record.speciesLabel.trim()));
     $('libraryCount').textContent = String(state.records.length);
     $('imageTotal').textContent = String(state.records.length);
     $('speciesTotal').textContent = String(species.size);

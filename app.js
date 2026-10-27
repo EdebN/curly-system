@@ -410,7 +410,7 @@
       state.aiDetections = detections;
       drawAIDetections();
       $('birdCount').textContent = String(detections.length);
-      $('speciesMatchCount').textContent = String(detections.filter((item) => item.match.label !== 'Bird' && item.match.label !== 'Unmatched bird').length);
+      $('speciesMatchCount').textContent = String(detections.filter((item) => item.match.label !== 'Unmatched' && item.match.similarity > 0).length);
       renderTracks();
       if (detections.length && !state.trainingReady) {
         $('aiStatus').textContent = detections.length + ' bird(s) detected. Train the species matcher to suggest species names.';
@@ -598,7 +598,7 @@
         const card = document.createElement('div'); card.className = 'track-item';
         const number = document.createElement('span'); number.className = 'track-number'; number.textContent = String(index + 1);
         const info = document.createElement('div');
-        const title = document.createElement('strong'); title.textContent = item.match.label === 'Bird' ? 'Bird detected' : item.match.label;
+        const title = document.createElement('strong'); title.textContent = item.match.label === 'Unmatched' ? (item.prediction.class || 'Object') + ' detected' : item.match.label;
         const detail = document.createElement('small');
         detail.textContent = 'Detector ' + Math.round(item.prediction.score * 100) + '% confidence' +
           (item.match.similarity ? ' · visual match ' + Math.round(item.match.similarity * 100) + '%' : '');

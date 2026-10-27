@@ -181,7 +181,7 @@
 
   function processFrame() {
     if (!state.cameraRunning) return;
-    if (state.detectionMode === "ai") {
+    if (state.detectionMode === "ai" || state.detectionMode === "rfdetr") {
       if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) runAIDetection();
       state.raf = requestAnimationFrame(processFrame);
       return;
@@ -732,7 +732,7 @@
   $('trainSpecies').addEventListener('click', trainSpeciesMatcher);
   $('aiMode').addEventListener('click', () => {
     state.detectionMode = 'ai';
-    $('aiMode').className = 'button primary'; $('motionMode').className = 'button secondary';
+    $('aiMode').className = 'button primary'; $('rfMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
     state.lastFrame = null; state.tracks = [];
     drawAIDetections();
     $('aiStatus').textContent = state.detectorModel ? 'AI bird detection selected.' : 'Load the AI models to begin object detection.';
@@ -740,7 +740,7 @@
   });
   $('motionMode').addEventListener('click', () => {
     state.detectionMode = 'motion';
-    $('motionMode').className = 'button primary'; $('aiMode').className = 'button secondary';
+    $('motionMode').className = 'button primary'; $('aiMode').className = 'button secondary'; $('rfMode').className = 'button secondary';
     state.aiDetections = []; state.lastFrame = null;
     drawOverlay(state.tracks);
     log('Detection mode changed to optional motion tracking.');

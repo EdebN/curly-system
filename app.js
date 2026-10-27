@@ -10,7 +10,7 @@
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
     objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
-    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false
+    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, rfSession: null, rfLabels: [], rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded"
   };
 
   const video = $('cameraVideo');
@@ -211,6 +211,95 @@
     state.raf = requestAnimationFrame(processFrame);
   }
 
+
+  async function loadRfDetrModel() {
+    const file = $('rfModelPicker').files && $('rfModelPicker').files[0];
+    if (!file) { $('rfStatus').textContent = 'Choose a compatible RF-DETR ONNX export first.'; return; }
+    if (!window.ort || !window.ort.InferenceSession) throw new Error('ONNX Runtime Web did not load. Check internet access and reload.');
+    $('loadRfDetr').disabled = true;
+    $('rfStatus').textContent = 'Loading model into browser memory. Large models may exceed iPad memory limits…';
+    try {
+      const bytes = await file.arrayBuffer();
+      let session;
+      try {
+        session = await window.ort.InferenceSession.create(bytes, { executionProviders: ['webgpu', 'wasm'], graphOptimizationLevel: 'all' });
+        state.rfProvider = 'WebGPU preferred';
+      } catch (gpuError) {
+        log('RF-DETR WebGPU initialisation failed; retrying with WASM: ' + gpuError.message, 'warn');
+        session = await window.ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
+        state.rfProvider = 'WASM';
+      }
+      state.rfSession = session;
+      state.rfModelName = file.name;
+      const meta = session.inputMetadata && session.inputMetadata[session.inputNames[0]];
+      const dims = meta && meta.dimensions;
+      state.rfInputSize = dims && dims.length >= 4 && Number.isFinite(dims[2]) && dims[2] > 0 ? dims[2] : 560;
+      state.detectionMode = 'rfdetr';
+      $('rfMode').className = 'button primary'; $('aiMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
+      $('rfStatus').textContent = 'Loaded ' + file.name + ' · input ' + state.rfInputSize + 'px · ' + state.rfProvider + '. Test with known images before relying on results.';
+      $('detectorCapability').textContent = 'RF-DETR ready'; $('detectorCapability').className = 'good';
+      log('RF-DETR ONNX loaded: ' + file.name + '; inputs=' + session.inputNames.join(',') + '; outputs=' + session.outputNames.join(',') + '.');
+    } catch (error) {
+      state.rfSession = null; $('rfStatus').textContent = 'RF-DETR load failed: ' + error.message;
+      log('RF-DETR load failed: ' + error.message, 'error'); throw error;
+    } finally { $('loadRfDetr').disabled = false; }
+  }
+
+  async function runRfDetrDetection() {
+    if (!state.rfSession || state.rfBusy || !video.videoWidth || !video.videoHeight) return;
+    state.rfBusy = true;
+    try {
+      const side = state.rfInputSize || 560;
+      const inputCanvas = document.createElement('canvas'); inputCanvas.width = side; inputCanvas.height = side;
+      const inputCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
+      inputCtx.fillStyle = '#fff'; inputCtx.fillRect(0, 0, side, side);
+      const scale = Math.min(side / video.videoWidth, side / video.videoHeight);
+      const drawW = Math.round(video.videoWidth * scale), drawH = Math.round(video.videoHeight * scale);
+      const offX = Math.floor((side - drawW) / 2), offY = Math.floor((side - drawH) / 2);
+      inputCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, offX, offY, drawW, drawH);
+      const pixels = inputCtx.getImageData(0, 0, side, side).data, plane = side * side;
+      const input = new Float32Array(plane * 3), mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225];
+      for (let p = 0; p < plane; p++) {
+        input[p] = (pixels[p * 4] / 255 - mean[0]) / std[0];
+        input[plane + p] = (pixels[p * 4 + 1] / 255 - mean[1]) / std[1];
+        input[plane * 2 + p] = (pixels[p * 4 + 2] / 255 - mean[2]) / std[2];
+      }
+      const result = await state.rfSession.run({ [state.rfSession.inputNames[0]]: new window.ort.Tensor('float32', input, [1, 3, side, side]) });
+      const outputs = state.rfSession.outputNames.map((name) => ({ name, tensor: result[name] }));
+      const boxOutput = outputs.find((o) => { const d = o.tensor.dims || []; return d.length >= 2 && d[d.length - 1] === 4; });
+      const scoreOutput = outputs.find((o) => o !== boxOutput && (o.tensor.dims || []).length >= 2);
+      if (!boxOutput || !scoreOutput) throw new Error('Could not identify boxes and scores in the ONNX outputs. This export needs a model-specific adapter.');
+      const boxes = boxOutput.tensor.data, scores = scoreOutput.tensor.data;
+      const boxDims = boxOutput.tensor.dims, scoreDims = scoreOutput.tensor.dims;
+      const count = boxDims[boxDims.length - 2], classes = scoreDims[scoreDims.length - 1], detections = [];
+      for (let i = 0; i < count; i++) {
+        let bestScore = -Infinity, bestClass = 0;
+        for (let c = 0; c < classes; c++) {
+          const raw = scores[i * classes + c], score = raw >= 0 && raw <= 1 ? raw : 1 / (1 + Math.exp(-raw));
+          if (score > bestScore) { bestScore = score; bestClass = c; }
+        }
+        if (bestScore < state.aiThreshold) continue;
+        let bx = boxes[i * 4], by = boxes[i * 4 + 1], bw = boxes[i * 4 + 2], bh = boxes[i * 4 + 3];
+        if (Math.max(Math.abs(bx), Math.abs(by), Math.abs(bw), Math.abs(bh)) <= 2) {
+          bx = (bx - bw / 2) * side; by = (by - bh / 2) * side; bw *= side; bh *= side;
+        } else { bx -= bw / 2; by -= bh / 2; }
+        const x = Math.max(0, (bx - offX) / scale), y = Math.max(0, (by - offY) / scale);
+        const w = Math.min(video.videoWidth - x, bw / scale), h = Math.min(video.videoHeight - y, bh / scale);
+        if (!(w > 2 && h > 2)) continue;
+        if (isMasked((x + w / 2) / video.videoWidth, (y + h / 2) / video.videoHeight)) continue;
+        const label = state.rfLabels[bestClass] || ('class_' + bestClass);
+        detections.push({ prediction: { bbox: [x, y, w, h], score: bestScore, class: label }, match: { label, similarity: 0 } });
+      }
+      detections.sort((a, b) => b.prediction.score - a.prediction.score);
+      state.aiDetections = detections.slice(0, 30); drawAIDetections();
+      $('birdCount').textContent = String(state.aiDetections.length); $('speciesMatchCount').textContent = '0';
+      $('aiStatus').textContent = 'RF-DETR inference completed. Verify the export’s input normalisation, box format and score format if detections look wrong.';
+    } catch (error) {
+      $('rfStatus').textContent = 'RF-DETR inference error: ' + error.message;
+      log('RF-DETR inference failed: ' + error.message, 'error');
+    } finally { state.rfBusy = false; }
+  }
+
   async function loadAIModels() {
     if (state.detectorModel && state.featureModel) return;
     if (!window.cocoSsd || !window.mobilenet || !window.tf) {
@@ -369,6 +458,7 @@
   }
 
   async function runAIDetection() {
+    if (state.detectionMode === 'rfdetr') { await runRfDetrDetection(); return; }
     if (!state.detectorModel || state.aiBusy || Date.now() - state.aiLastRun < 450) return;
     state.aiBusy = true;
     state.aiLastRun = Date.now();
@@ -624,6 +714,21 @@
   }
 
   $('loadAI').addEventListener('click', () => loadAIModels().catch((error) => log('AI load error: ' + error.message, 'error')));
+  $('loadRfDetr').addEventListener('click', () => loadRfDetrModel().catch((error) => log('RF-DETR load error: ' + error.message, 'error')));
+  $('rfLabelsPicker').addEventListener('change', async (event) => {
+    const file = event.target.files && event.target.files[0]; if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      state.rfLabels = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.names) ? parsed.names : Object.values(parsed));
+      $('rfStatus').textContent = 'Loaded ' + state.rfLabels.length + ' class labels from ' + file.name + '.';
+      log('Loaded RF-DETR labels: ' + state.rfLabels.length + '.');
+    } catch (error) { $('rfStatus').textContent = 'Labels JSON invalid: ' + error.message; log('RF-DETR labels parse failed: ' + error.message, 'error'); }
+  });
+  $('rfMode').addEventListener('click', () => {
+    if (!state.rfSession) { $('rfStatus').textContent = 'Load a compatible RF-DETR ONNX model first.'; return; }
+    state.detectionMode = 'rfdetr'; $('rfMode').className = 'button primary'; $('aiMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
+    state.lastFrame = null; log('Detection mode changed to RF-DETR ONNX.');
+  });
   $('trainSpecies').addEventListener('click', trainSpeciesMatcher);
   $('aiMode').addEventListener('click', () => {
     state.detectionMode = 'ai';
@@ -948,7 +1053,7 @@
     log('Wildlife Vision web app initialising.');
     log('Runtime: ' + navigator.userAgent);
     log('Secure context: ' + (window.isSecureContext ? 'yes' : 'no') + '.');
-    log('AI bird detector will load on demand; motion tracking remains available as a secondary mode.');
+    log('AI detector loads on demand. RF-DETR ONNX inference is available as an experimental model-upload path; motion tracking remains available as a secondary mode.');
     if (!window.isSecureContext) log('Use HTTPS (GitHub Pages) for camera access and SHA-256 duplicate checks.', 'warn');
     try {
       state.db = await openDatabase();

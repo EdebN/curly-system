@@ -6,7 +6,7 @@
   const state = {
     stream: null, track: null, cameraRunning: false, raf: 0, lastFrame: null,
     frameWidth: 0, frameHeight: 0, sensitivity: 30, minArea: 25, zoom: 1,
-    cssZoom: 1, masks: [], drawingMask: false, maskStart: null, maskDraft: null,
+    cssZoom: 1, fullscreenFallback: false, masks: [], drawingMask: false, maskStart: null, maskDraft: null,
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
     objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
@@ -84,6 +84,10 @@
       $('startCamera').disabled = true;
       $('stopCamera').disabled = false;
       $('zoomSlider').disabled = false;
+      $('fullscreenZoomSlider').disabled = false;
+      $('fullscreenZoomSlider').min = $('zoomSlider').min;
+      $('fullscreenZoomSlider').max = $('zoomSlider').max;
+      $('fullscreenZoomSlider').value = $('zoomSlider').value;
       setStatus('Camera live', true);
       setCameraCapability('Granted', 'good');
       log('Camera started: ' + (video.videoWidth || '?') + ' × ' + (video.videoHeight || '?') + '.');
@@ -144,6 +148,12 @@
     $('startCamera').disabled = false;
     $('stopCamera').disabled = true;
     $('zoomSlider').disabled = true;
+    $('fullscreenZoomSlider').disabled = true;
+    if (state.fullscreenFallback) {
+      cameraStage.classList.remove('fullscreen-mode');
+      state.fullscreenFallback = false;
+      document.body.classList.remove('camera-fullscreen-open');
+    }
     setStatus('Camera paused', false);
     setCameraCapability('Stopped', 'neutral');
     drawOverlay([]);
@@ -163,6 +173,8 @@
       const max = Math.max(min, Math.min(6, Number(caps.zoom.max) || 3));
       $('zoomSlider').min = String(min);
       $('zoomSlider').max = String(max);
+      $('fullscreenZoomSlider').min = String(min);
+      $('fullscreenZoomSlider').max = String(max);
       log('Hardware zoom supported: ' + min + '× to ' + max + '×.');
     } else {
       log('Hardware zoom is not available in this browser/camera; using visual crop zoom.', 'warn');
@@ -172,6 +184,9 @@
   async function setZoom(value) {
     state.zoom = Number(value);
     $('zoomValue').textContent = state.zoom.toFixed(1) + '×';
+    $('fullscreenZoomValue').textContent = state.zoom.toFixed(1) + '×';
+    $('zoomSlider').value = String(state.zoom);
+    $('fullscreenZoomSlider').value = String(state.zoom);
     let applied = false;
     if (state.track && state.track.getCapabilities && state.track.getCapabilities().zoom && state.track.applyConstraints) {
       try {
@@ -183,10 +198,67 @@
     }
     state.cssZoom = applied ? 1 : state.zoom;
     video.style.transform = 'scale(' + state.cssZoom + ')';
+    canvas.style.transform = 'scale(' + state.cssZoom + ')';
+    canvas.style.transformOrigin = 'center center';
     log('Zoom set to ' + state.zoom.toFixed(1) + '×' + (applied ? ' (camera hardware).' : ' (visual crop).'));
   }
   $('zoomSlider').addEventListener('input', (event) => setZoom(event.target.value));
-  $('zoomReset').addEventListener('click', () => { $('zoomSlider').value = '1'; setZoom(1); });
+  $('fullscreenZoomSlider').addEventListener('input', (event) => setZoom(event.target.value));
+  $('zoomReset').addEventListener('click', () => { $('zoomSlider').value = '1'; $('fullscreenZoomSlider').value = '1'; setZoom(1); });
+  $('fullscreenZoomReset').addEventListener('click', () => { $('zoomSlider').value = '1'; $('fullscreenZoomSlider').value = '1'; setZoom(1); });
+  $('fullscreenZoomOut').addEventListener('click', () => changeZoom(-0.2));
+  $('fullscreenZoomIn').addEventListener('click', () => changeZoom(0.2));
+  $('fullscreenToggle').addEventListener('click', toggleCameraFullscreen);
+  document.addEventListener('fullscreenchange', syncFullscreenState);
+  document.addEventListener('webkitfullscreenchange', syncFullscreenState);
+
+  function changeZoom(delta) {
+    const slider = $('zoomSlider');
+    const next = Math.max(Number(slider.min) || 1, Math.min(Number(slider.max) || 6, Number(slider.value) + delta));
+    slider.value = String(next);
+    $('fullscreenZoomSlider').value = String(next);
+    setZoom(next);
+  }
+  async function toggleCameraFullscreen() {
+    const nativeActive = document.fullscreenElement === cameraStage || document.webkitFullscreenElement === cameraStage;
+    if (nativeActive || state.fullscreenFallback) {
+      if (nativeActive) {
+        try {
+          if (document.exitFullscreen) await document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        } catch (error) { log('Could not exit native fullscreen: ' + error.message, 'warn'); }
+      }
+      cameraStage.classList.remove('fullscreen-mode');
+      state.fullscreenFallback = false;
+      document.body.classList.remove('camera-fullscreen-open');
+      syncFullscreenState();
+      return;
+    }
+    try {
+      const request = cameraStage.requestFullscreen || cameraStage.webkitRequestFullscreen;
+      if (request) {
+        await request.call(cameraStage);
+        cameraStage.classList.add('fullscreen-mode');
+      } else {
+        state.fullscreenFallback = true;
+        cameraStage.classList.add('fullscreen-mode');
+        document.body.classList.add('camera-fullscreen-open');
+      }
+    } catch (error) {
+      state.fullscreenFallback = true;
+      cameraStage.classList.add('fullscreen-mode');
+      document.body.classList.add('camera-fullscreen-open');
+      log('Using in-page fullscreen fallback: ' + error.message, 'warn');
+    }
+    syncFullscreenState();
+  }
+  function syncFullscreenState() {
+    const active = state.fullscreenFallback || document.fullscreenElement === cameraStage || document.webkitFullscreenElement === cameraStage;
+    cameraStage.classList.toggle('fullscreen-mode', active);
+    document.body.classList.toggle('camera-fullscreen-open', active && state.fullscreenFallback);
+    $('fullscreenToggle').textContent = active ? 'EXIT FULLSCREEN' : 'FULLSCREEN';
+    $('fullscreenToggle').setAttribute('aria-label', active ? 'Exit fullscreen' : 'Enter fullscreen');
+  }
 
   function sizeCanvases() {
     if (!video.videoWidth || !video.videoHeight) return;
@@ -571,7 +643,11 @@
         best.vx = best.vx * 0.55 + rawVx * 0.45;
         best.vy = best.vy * 0.55 + rawVy * 0.45;
         const speed = Math.hypot(best.vx, best.vy);
-        best.motionEvidence = speed >= 0.045 ? Math.min(5, (best.motionEvidence || 0) + 1) : Math.max(0, (best.motionEvidence || 0) - 1);
+        const boxScale = Math.max(0.035, Math.hypot(box.w, box.h));
+        const displacement = Math.hypot(cx - (best.previousCx ?? cx), cy - (best.previousCy ?? cy));
+        const genuineMotion = speed >= 0.085 && displacement >= Math.min(0.025, boxScale * 0.12);
+        best.motionEvidence = genuineMotion ? Math.min(6, (best.motionEvidence || 0) + 1) : Math.max(0, (best.motionEvidence || 0) - 1);
+        best.previousCx = cx; best.previousCy = cy;
       }
       best.box = box; best.cx = cx; best.cy = cy; best.updatedAt = now; best.missed = 0; best.item = item;
       best.history.push({ x: cx, y: cy, t: now });
@@ -594,7 +670,7 @@
     const relevant = detections.filter((item) => {
       const track = state.spatialTracks.find((candidate) => candidate.missed === 0 && candidate.item === item);
       const priority = isPriorityLearnedDetection(item);
-      if (track) track.visible = priority || (track.motionEvidence || 0) >= 2;
+      if (track) track.visible = priority || (track.motionEvidence || 0) >= 4;
       return priority || Boolean(track && track.visible);
     });
     const active = state.spatialTracks.filter((track) => track.missed === 0 && track.visible);
@@ -684,7 +760,7 @@
       ctx.save();
       // A dark halo keeps the box legible against both bright sky and dark foliage.
       ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.72)'; ctx.strokeRect(x, y, w, h);
-      ctx.lineWidth = 2.5; ctx.strokeStyle = '#b8ff5c'; ctx.strokeRect(x, y, w, h);
+      ctx.lineWidth = 2.5; ctx.strokeStyle = '#d6b47a'; ctx.strokeRect(x, y, w, h);
       const corner = Math.min(13, Math.max(5, Math.min(w, h) * .16));
       ctx.lineWidth = 4; ctx.strokeStyle = '#eaffb8';
       ctx.beginPath();
@@ -700,13 +776,13 @@
       const labelX = Math.max(0, Math.min(cw - labelWidth, x));
       const labelY = y >= labelHeight + 4 ? y - labelHeight - 2 : Math.min(ch - labelHeight, y + 2);
       ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 8;
-      ctx.fillStyle = '#b8ff5c';
+      ctx.fillStyle = '#d6b47a';
       ctx.beginPath();
       if (typeof ctx.roundRect === 'function') ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 5);
       else ctx.rect(labelX, labelY, labelWidth, labelHeight);
       ctx.fill();
       ctx.shadowBlur = 0;
-      ctx.fillStyle = '#14200b';
+      ctx.fillStyle = '#211a10';
       ctx.textBaseline = 'middle';
       const availableTextWidth = Math.max(0, labelWidth - 12);
       let shown = text;
@@ -830,13 +906,13 @@
     if (!state.showMotion) return;
     tracks.forEach((track) => {
       const x = track.x * canvas.width, y = track.y * canvas.height, w = track.w * canvas.width, h = track.h * canvas.height;
-      ctx.strokeStyle = '#a7f36c'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
-      ctx.fillStyle = '#a7f36c';
+      ctx.strokeStyle = '#d6b47a'; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = '#d6b47a';
       const label = '#' + track.id + ' MOTION';
       ctx.font = 'bold 10px ui-monospace, monospace';
       const labelWidth = ctx.measureText(label).width + 10;
       ctx.fillRect(x, Math.max(0, y - 18), labelWidth, 18);
-      ctx.fillStyle = '#12200e';
+      ctx.fillStyle = '#211a10';
       ctx.fillText(label, x + 5, Math.max(12, y - 6));
     });
   }

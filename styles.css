@@ -86,7 +86,7 @@ input[type=range],.toggle-setting input{accent-color:#c4b39a}
 .fullscreen-tools{display:none!important}
 .camera-stage.fullscreen-mode .fullscreen-tools{display:flex!important;position:fixed!important;left:50%!important;right:auto!important;top:auto!important;bottom:max(14px,env(safe-area-inset-bottom))!important;transform:translateX(-50%)!important;width:max-content!important;max-width:calc(100vw - 16px)!important;z-index:10002!important;justify-content:center!important}
 .camera-stage.fullscreen-mode{overflow:hidden!important}
-.camera-stage.fullscreen-mode video,.camera-stage.fullscreen-mode canvas{z-index:1}
+.camera-stage video{z-index:0!important}.camera-stage canvas#motionCanvas{z-index:1!important;pointer-events:none}.camera-stage.masking canvas#motionCanvas{pointer-events:auto}.camera-stage.fullscreen-mode video{z-index:0!important}.camera-stage.fullscreen-mode canvas#motionCanvas{z-index:1!important}
 .camera-stage.fullscreen-mode .stage-chip{z-index:3}
 .camera-stage.fullscreen-mode .fullscreen-tools{z-index:10003!important}
 .camera-fullscreen-open .camera-stage.fullscreen-mode .fullscreen-tools{display:flex!important}

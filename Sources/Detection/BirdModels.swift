@@ -8,18 +8,21 @@ final class BirdDetector {
     let loadError: String?
 
     init() {
-        guard let url = Bundle.main.url(forResource: "BirdDetector", withExtension: "mlmodelc") ?? Bundle.module.url(forResource: "BirdDetector", withExtension: "mlmodelc") else {
+        guard let url = Bundle.main.url(forResource: "BirdDetector", withExtension: "mlmodelc") else {
             visionModel = nil
-            loadError = "BirdDetector.mlmodel is not bundled yet. Import and annotate data, then add a trained detector model."
+            loadError = "BirdDetector.mlmodel is not bundled yet. Import and label bird images, then add a trained object-detection model."
             return
         }
-        do {
-            visionModel = try VNCoreMLModel(for: MLModel(contentsOf: url))
-            loadError = nil
-        } catch {
+
+        guard let model = try? MLModel(contentsOf: url),
+              let loadedVisionModel = try? VNCoreMLModel(for: model) else {
             visionModel = nil
-            loadError = "Could not load BirdDetector: \(error.localizedDescription)"
+            loadError = "BirdDetector could not be loaded. Check that the bundled Core ML model is valid."
+            return
         }
+
+        visionModel = loadedVisionModel
+        loadError = nil
     }
 
     var isReady: Bool { visionModel != nil }
@@ -45,18 +48,21 @@ final class SpeciesClassifier {
     let loadError: String?
 
     init() {
-        guard let url = Bundle.main.url(forResource: "BirdSpeciesClassifier", withExtension: "mlmodelc") ?? Bundle.module.url(forResource: "BirdSpeciesClassifier", withExtension: "mlmodelc") else {
+        guard let url = Bundle.main.url(forResource: "BirdSpeciesClassifier", withExtension: "mlmodelc") else {
             visionModel = nil
             loadError = "BirdSpeciesClassifier.mlmodel is not bundled yet."
             return
         }
-        do {
-            visionModel = try VNCoreMLModel(for: MLModel(contentsOf: url))
-            loadError = nil
-        } catch {
+
+        guard let model = try? MLModel(contentsOf: url),
+              let loadedVisionModel = try? VNCoreMLModel(for: model) else {
             visionModel = nil
-            loadError = "Could not load species classifier: \(error.localizedDescription)"
+            loadError = "Bird species classifier could not be loaded. Check that the bundled Core ML model is valid."
+            return
         }
+
+        visionModel = loadedVisionModel
+        loadError = nil
     }
 
     var isReady: Bool { visionModel != nil }

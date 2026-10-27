@@ -11,3 +11,6 @@
 .rf-label-row .helper{overflow-wrap:anywhere}
 .rf-file-button{font-size:.78rem;max-width:220px;white-space:normal;text-align:center;position:relative;overflow:hidden}
 .rf-file-button input{max-width:1px;max-height:1px;overflow:hidden;position:absolute;opacity:0;pointer-events:none}
+
+.spatial-card .scene-summary{margin:10px 0;padding:11px;border:1px solid #344533;background:#0c130e;border-radius:9px;color:#d8e8d4;font-size:11px;line-height:1.6;overflow-wrap:anywhere}
+.spatial-card .capability strong{font-size:14px}

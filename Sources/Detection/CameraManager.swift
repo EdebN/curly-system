@@ -87,8 +87,8 @@ final class CameraManager: NSObject, ObservableObject, AVCaptureVideoDataOutputS
                     return
                 }
                 self.session.addOutput(output)
-                if let connection = output.connection(with: .video), connection.isVideoOrientationSupported {
-                    connection.videoOrientation = .portrait
+                if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(90) {
+                    connection.videoRotationAngle = 90
                 }
                 self.session.commitConfiguration()
                 self.configured = true

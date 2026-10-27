@@ -677,8 +677,11 @@
     const relevant = detections.filter((item) => {
       const track = state.spatialTracks.find((candidate) => candidate.missed === 0 && candidate.item === item);
       const priority = isPriorityLearnedDetection(item);
-      if (track) track.visible = priority || (track.motionEvidence || 0) >= 4;
-      return priority || Boolean(track && track.visible);
+      // Human detections must not depend on movement: a stationary person is still a person.
+      const human = String(item && item.prediction && item.prediction.class || '').toLowerCase() === 'person' ||
+        String(track && track.label || '').toLowerCase() === 'person';
+      if (track) track.visible = priority || human || (track.motionEvidence || 0) >= 4;
+      return priority || human || Boolean(track && track.visible);
     });
     const active = state.spatialTracks.filter((track) => track.missed === 0 && track.visible);
     $('spatialCount').textContent = String(active.length);

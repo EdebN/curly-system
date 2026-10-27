@@ -52,6 +52,13 @@
             </div>
             <div class="stage-chip chip-top"><span class="status-dot"></span> LIVE FEED</div>
             <div class="stage-chip chip-bottom" id="motionReadout">MOTION 0.0%</div>
+            <div class="fullscreen-tools" id="fullscreenTools" aria-label="Camera fullscreen controls">
+              <button id="fullscreenZoomOut" class="mini-control" type="button" aria-label="Zoom out">−</button>
+              <label class="fullscreen-zoom"><span>ZOOM <strong id="fullscreenZoomValue">1.0×</strong></span><input id="fullscreenZoomSlider" type="range" min="1" max="6" step="0.1" value="1" disabled></label>
+              <button id="fullscreenZoomIn" class="mini-control" type="button" aria-label="Zoom in">+</button>
+              <button id="fullscreenZoomReset" class="mini-control reset-control" type="button">RESET</button>
+              <button id="fullscreenToggle" class="mini-control fullscreen-button" type="button" aria-label="Enter fullscreen">FULLSCREEN</button>
+            </div>
           </div>
           <div class="camera-controls">
             <button id="startCamera" class="button primary">Start camera</button><button id="captureSnapshot" class="button secondary">Save annotated frame</button>

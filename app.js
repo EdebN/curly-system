@@ -571,14 +571,26 @@
     state.aiLastRun = Date.now();
     try {
       const threshold = state.aiThreshold;
-      const predictions = await state.detectorModel.detect(video, 10, threshold);
-      const candidates = predictions.filter((item) => item.score >= threshold).map((item) => ({
+      // Ask COCO-SSD for lower-confidence candidates too. A quiet, partly occluded
+      // person can score below the general threshold even though people should not
+      // be filtered based on movement.
+      const predictions = await state.detectorModel.detect(video, 20, Math.min(threshold, 0.20));
+      const candidates = predictions.filter((item) => {
+        const label = String(item.class || '').toLowerCase();
+        return item.score >= threshold || (label === 'person' && item.score >= 0.20);
+      }).map((item) => ({
         prediction: item,
         centerX: (item.bbox[0] + item.bbox[2] / 2) / (video.videoWidth || 1),
         centerY: (item.bbox[1] + item.bbox[3] / 2) / (video.videoHeight || 1)
       })).filter((item) => !isMasked(item.centerX, item.centerY));
+      // Reserve slots for people before sorting the remaining objects by confidence.
+      candidates.sort((a, b) => {
+        const aPerson = String(a.prediction.class || '').toLowerCase() === 'person' ? 1 : 0;
+        const bPerson = String(b.prediction.class || '').toLowerCase() === 'person' ? 1 : 0;
+        return bPerson - aPerson || b.prediction.score - a.prediction.score;
+      });
       const detections = [];
-      for (const candidate of candidates.slice(0, 4)) {
+      for (const candidate of candidates.slice(0, 8)) {
         let match = { label: candidate.prediction.class, similarity: 0 };
         if (state.trainingReady) {
           try {
@@ -613,7 +625,7 @@
       if (detections.length && !state.trainingReady) {
         $('aiStatus').textContent = detections.length + ' bird(s) detected. Train the species matcher to suggest species names.';
       } else if (!detections.length) {
-        $('aiStatus').textContent = 'No moving objects or learned species targets detected. Stationary generic objects are filtered.';
+        $('aiStatus').textContent = 'No objects passed the detector confidence threshold in this frame. A person should be detected independently of movement when the model recognises them.';
       }
     } catch (error) {
       log('AI detection failed: ' + error.message, 'error');

@@ -164,6 +164,15 @@
     </section>
   </main>
 
+  <dialog id="observationDialog" class="edit-dialog observation-dialog">
+    <div class="dialog-heading">
+      <div><p class="eyebrow">OBSERVATION DETAILS</p><h2 id="observationDialogTitle">Detected object</h2><p id="observationConfidence" class="observation-confidence"></p></div>
+      <button id="closeObservation" class="icon-button" type="button" aria-label="Close observation details">×</button>
+    </div>
+    <div id="observationDetails" class="observation-details"></div>
+    <p id="observationNote" class="helper observation-note"></p>
+    <div class="dialog-actions"><button id="closeObservationBottom" class="button primary" type="button">Close</button></div>
+  </dialog>
   <dialog id="editDialog" class="edit-dialog">
     <form method="dialog" id="editForm">
       <div class="dialog-heading"><div><p class="eyebrow">DATASET REVIEW</p><h2>Edit image record</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>

@@ -838,8 +838,8 @@
     const rows = [
       ['Detected name', observationName(item)],
       ['Detector class', item.prediction.class || 'Not provided'],
-      ['Detector confidence', Math.round(clamp(item.prediction.score, 0, 1) * 100) + '%'],
-      ['Visual species match', item.match && item.match.similarity > 0 ? Math.round(clamp(item.match.similarity, 0, 1) * 100) + '% similarity' : 'No separate species match'],
+      ['Detector confidence', Math.round(Math.max(0, Math.min(1, Number(item.prediction.score) || 0)) * 100) + '%'],
+      ['Visual species match', item.match && item.match.similarity > 0 ? Math.round(Math.max(0, Math.min(1, Number(item.match.similarity) || 0)) * 100) + '% similarity' : 'No separate species match'],
       ['Tracking ID', spatial ? '#' + spatial.id : 'Not currently tracked'],
       ['Position in frame', spatial ? relativePosition(spatial.cx, spatial.cy) : 'Unavailable'],
       ['Movement', spatial ? movementLabel(spatial) : 'Unavailable'],
@@ -853,7 +853,7 @@
       row.append(key, val); body.append(row);
     });
     $('observationDialogTitle').textContent = observationName(item);
-    $('observationConfidence').textContent = Math.round(clamp(item.prediction.score, 0, 1) * 100) + '% detector confidence';
+    $('observationConfidence').textContent = Math.round(Math.max(0, Math.min(1, Number(item.prediction.score) || 0)) * 100) + '% detector confidence';
     $('observationNote').textContent = item.prediction.learned
       ? 'This result comes from the example-based image matcher. Similarity is not a calibrated probability that the species identification is correct.'
       : 'Detector confidence describes the model output, not a guarantee of correct identification. A generic label such as “bird” is not a species-level identification.';
@@ -882,7 +882,7 @@
         const title = document.createElement('strong'); title.className = 'observation-name'; title.textContent = observationName(item);
         const detail = document.createElement('span'); detail.className = 'observation-meta';
         const confidence = document.createElement('span'); confidence.className = 'confidence-pill';
-        confidence.textContent = Math.round(clamp(item.prediction.score, 0, 1) * 100) + '% sure';
+        confidence.textContent = Math.round(Math.max(0, Math.min(1, Number(item.prediction.score) || 0)) * 100) + '% sure';
         const position = document.createElement('span'); position.className = 'observation-position';
         position.textContent = spatial ? relativePosition(spatial.cx, spatial.cy) : 'Position unavailable';
         const hint = document.createElement('span'); hint.className = 'observation-hint'; hint.textContent = 'Click for details';

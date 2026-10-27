@@ -6,27 +6,25 @@ A static HTML/CSS/JavaScript wildlife observation and bird-image dataset app for
 
 1. Open this repository on GitHub.
 2. Open **Settings → Pages**.
-3. Under **Build and deployment**, choose **Deploy from a branch**.
-4. Select branch `main` and folder `/(root)`, then save.
-5. Open the HTTPS Pages URL GitHub provides. In iPad Safari, allow camera access.
+3. Under **Build and deployment**, choose the configured deployment workflow or branch deployment.
+4. Open the HTTPS Pages URL in Safari and allow camera access.
 
 ## Features
 
-- Rear-camera preview with start/pause controls and permission diagnostics.
-- Frame-difference motion detection with adjustable sensitivity and minimum region size.
-- Lightweight region matching to keep track IDs through brief missed frames.
-- Hardware zoom where available, with visual crop zoom as a fallback.
-- User-drawn exclusion masks, motion overlay, live metrics, and a diagnostic console.
-- Individual image and species-folder imports.
-- Local IndexedDB storage for image blobs and metadata, SHA-256 duplicate detection, editable labels, train/validation/test splits, search/filter, and CSV manifest export.
+- Pretrained COCO-SSD live object detection filtered to birds, with bounding boxes and confidence threshold.
+- MobileNet feature-based species matching learned from labelled library images.
+- Optional frame-difference motion tracking mode.
+- Rear-camera preview, zoom where available, exclusion masks, live metrics, and diagnostics.
+- ZIP imports of species-named folders and individual photos.
+- Local IndexedDB storage, SHA-256 duplicate detection, editable labels, train/validation/test splits, search/filter, and CSV manifest export.
 
 ## Limitations and data safety
 
-The live detector finds pixel changes and tracks moving regions. It does **not** recognise birds or people and cannot identify species. A trained browser-compatible detector and a separate species classifier would be needed; neither is included.
+The detector is a general-purpose object detector, not a specialised bird-only model. The species matcher compares visual features against examples; it does not fine-tune model weights, and its results are estimates. Use several clear images per species and rebuild the matcher after changing labels or importing examples. The matcher is rebuilt each page session and does not persist its feature vectors between reloads.
 
-Imported images and labels stay in this browser on this device. Clearing site data can erase them. CSV export contains the metadata manifest, not the image files, so keep separate copies of your original images.
+The AI libraries and model weights load from public CDNs and require internet access for initial loading. Inference runs in the browser. Imported images and labels stay in this browser on this device. Clearing site data can erase them. CSV export contains the metadata manifest, not the image files, so keep separate copies of original images.
 
-Manual bounding-box annotation and in-browser model training are not implemented. Camera zoom support varies by device and browser; visual zoom crops the preview and does not improve optical detail.
+Camera zoom support varies by device and browser; visual zoom crops the preview and does not improve optical detail.
 
 ## Local development
 

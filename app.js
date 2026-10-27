@@ -315,8 +315,11 @@
         detections.push({ prediction: { bbox: [x, y, w, h], score: bestScore, class: label }, match: { label, similarity: 0 } });
       }
       detections.sort((a, b) => b.prediction.score - a.prediction.score);
-      state.aiDetections = detections.slice(0, 30); updateSpatialTracks(state.aiDetections); drawAIDetections();
-      $('birdCount').textContent = String(state.aiDetections.length); $('speciesMatchCount').textContent = '0';
+      updateSpatialTracks(detections.slice(0, 30));
+      state.aiDetections = filterRelevantDetections(detections.slice(0, 30));
+      drawAIDetections();
+      $('birdCount').textContent = String(state.aiDetections.length);
+      $('speciesMatchCount').textContent = String(state.aiDetections.filter(isPriorityLearnedDetection).length);
       renderTracks();
       $('aiStatus').textContent = 'RF-DETR inference completed. Verify the export’s input normalisation, box format and score format if detections look wrong.';
     } catch (error) {
@@ -522,11 +525,11 @@
         } catch (error) { log('Learned object scan failed: ' + error.message, 'warn'); }
       }
       detections.sort((a, b) => (b.match.similarity || b.prediction.score) - (a.match.similarity || a.prediction.score));
-      state.aiDetections = detections;
       updateSpatialTracks(detections);
+      state.aiDetections = filterRelevantDetections(detections);
       drawAIDetections();
-      $('birdCount').textContent = String(detections.length);
-      $('speciesMatchCount').textContent = String(detections.filter((item) => item.match.label !== 'Unmatched' && item.match.similarity > 0).length);
+      $('birdCount').textContent = String(state.aiDetections.length);
+      $('speciesMatchCount').textContent = String(state.aiDetections.filter(isPriorityLearnedDetection).length);
       renderTracks();
       if (detections.length && !state.trainingReady) {
         $('aiStatus').textContent = detections.length + ' bird(s) detected. Train the species matcher to suggest species names.';
@@ -543,7 +546,7 @@
 
   function updateSpatialTracks(detections) {
     const now = performance.now();
-    state.spatialTracks.forEach((track) => { track.missed++; });
+    state.spatialTracks.forEach((track) => { track.missed++; if (track.missed > 0) track.visible = false; });
     const claimed = new Set(), next = [];
     for (const item of detections) {
       const b = item.prediction.bbox;
@@ -560,13 +563,15 @@
         if ((overlap > 0.01 || distance < 0.14) && cost < bestCost) { best = track; bestCost = cost; }
       }
       if (!best) {
-        best = { id: state.nextSpatialId++, label, born: now, history: [], box, cx, cy, vx: 0, vy: 0, missed: 0 };
+        best = { id: state.nextSpatialId++, label, born: now, history: [], box, cx, cy, vx: 0, vy: 0, motionEvidence: 0, visible: false, missed: 0 };
         log('Spatial track #' + best.id + ' acquired: ' + label + '.');
       } else {
         const dt = Math.max(0.04, (now - (best.updatedAt || now - 40)) / 1000);
         const rawVx = (cx - best.cx) / dt, rawVy = (cy - best.cy) / dt;
         best.vx = best.vx * 0.55 + rawVx * 0.45;
         best.vy = best.vy * 0.55 + rawVy * 0.45;
+        const speed = Math.hypot(best.vx, best.vy);
+        best.motionEvidence = speed >= 0.045 ? Math.min(5, (best.motionEvidence || 0) + 1) : Math.max(0, (best.motionEvidence || 0) - 1);
       }
       best.box = box; best.cx = cx; best.cy = cy; best.updatedAt = now; best.missed = 0; best.item = item;
       best.history.push({ x: cx, y: cy, t: now });
@@ -577,9 +582,27 @@
       if (track.missed > 0 && track.missed <= 8 && !next.some((item) => item.id === track.id)) next.push(track);
     }
     state.spatialTracks = next.filter((track) => track.missed <= 8);
-    const active = state.spatialTracks.filter((track) => track.missed === 0);
+  }
+
+  function isPriorityLearnedDetection(item) {
+    return Boolean(item && item.prediction && item.prediction.learned) ||
+      Boolean(item && item.match && item.match.label && item.match.label !== 'Unmatched' &&
+        Number(item.match.similarity) >= 0.62);
+  }
+
+  function filterRelevantDetections(detections) {
+    const relevant = detections.filter((item) => {
+      const track = state.spatialTracks.find((candidate) => candidate.missed === 0 && candidate.item === item);
+      const priority = isPriorityLearnedDetection(item);
+      if (track) track.visible = priority || (track.motionEvidence || 0) >= 2;
+      return priority || Boolean(track && track.visible);
+    });
+    const active = state.spatialTracks.filter((track) => track.missed === 0 && track.visible);
     $('spatialCount').textContent = String(active.length);
-    $('sceneSummary').textContent = active.length ? active.map((track) => track.label + ' · ' + relativePosition(track.cx, track.cy)).slice(0, 3).join(' | ') : 'No tracked objects in view';
+    $('sceneSummary').textContent = active.length
+      ? active.map((track) => track.label + ' · ' + relativePosition(track.cx, track.cy) + (isPriorityLearnedDetection(track.item) ? ' · learned target' : ' · moving')).slice(0, 3).join(' | ')
+      : 'No moving objects or learned targets in view';
+    return relevant;
   }
 
   function relativePosition(x, y) {
@@ -612,7 +635,7 @@
     }
     if (state.showTrails) {
       for (const track of state.spatialTracks) {
-        if (track.history.length < 2) continue;
+        if (!track.visible || track.history.length < 2) continue;
         ctx.save(); ctx.strokeStyle = 'rgba(184,255,92,.8)'; ctx.lineWidth = 2; ctx.beginPath();
         track.history.forEach((point, index) => {
           const x = point.x * canvas.width, y = point.y * canvas.height;

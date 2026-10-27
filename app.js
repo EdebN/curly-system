@@ -9,7 +9,8 @@
     cssZoom: 1, masks: [], drawingMask: false, maskStart: null, maskDraft: null,
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
-    objectURLs: new Map(), motionScore: 0
+    objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
+    aiBusy: false, aiLastRun: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false
   };
 
   const video = $('cameraVideo');
@@ -88,6 +89,7 @@
       log('Camera started: ' + (video.videoWidth || '?') + ' × ' + (video.videoHeight || '?') + '.');
       inspectZoomCapabilities();
       sizeCanvases();
+      if (!state.detectorModel) loadAIModels().catch((error) => log("AI model loading failed: " + error.message, "error"));
       state.raf = requestAnimationFrame(processFrame);
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
@@ -177,6 +179,11 @@
 
   function processFrame() {
     if (!state.cameraRunning) return;
+    if (state.detectionMode === "ai") {
+      if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) runAIDetection();
+      state.raf = requestAnimationFrame(processFrame);
+      return;
+    }
     if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
       sizeCanvases();
       try {
@@ -200,6 +207,191 @@
       }
     }
     state.raf = requestAnimationFrame(processFrame);
+  }
+
+  async function loadAIModels() {
+    if (state.detectorModel && state.featureModel) return;
+    if (!window.cocoSsd || !window.mobilenet || !window.tf) {
+      $('aiStatus').textContent = 'AI libraries did not load. Check internet access and reload the page.';
+      throw new Error('TensorFlow.js model libraries are unavailable.');
+    }
+    $('loadAI').disabled = true;
+    $('aiStatus').textContent = 'Loading AI models. The first download can take a while on iPad…';
+    log('Loading pretrained COCO-SSD object detector.');
+    try {
+      await window.tf.ready();
+      state.detectorModel = await window.cocoSsd.load({ base: 'lite_mobilenet_v2' });
+      log('Bird object detector loaded.');
+      $('detectorCapability').textContent = 'Ready';
+      $('detectorCapability').className = 'good';
+      $('aiStatus').textContent = 'Loading visual feature model for species matching…';
+      state.featureModel = await window.mobilenet.load({ version: 2, alpha: 1.0 });
+      $('aiStatus').textContent = 'AI detector ready. To identify species, label photos in the Bird library and train the example matcher.';
+      log('MobileNet feature extractor loaded.');
+      $('loadAI').textContent = 'AI models ready';
+      $('loadAI').classList.remove('secondary');
+      $('loadAI').classList.add('primary');
+      if (state.records.some((record) => record.speciesLabel && record.speciesLabel !== 'Unlabelled')) {
+        log('Labelled library records found. Train the species matcher from the Bird library when ready.');
+      }
+    } catch (error) {
+      state.detectorModel = null;
+      state.featureModel = null;
+      $('detectorCapability').textContent = 'Load failed';
+      $('detectorCapability').className = 'warn';
+      $('aiStatus').textContent = 'Could not load AI models: ' + error.message;
+      throw error;
+    } finally {
+      $('loadAI').disabled = false;
+    }
+  }
+
+  function cosineSimilarity(a, b) {
+    let dot = 0, aa = 0, bb = 0;
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) { dot += a[i] * b[i]; aa += a[i] * a[i]; bb += b[i] * b[i]; }
+    return dot / (Math.sqrt(aa * bb) || 1);
+  }
+
+  async function extractFeatures(source) {
+    const tensor = state.featureModel.infer(source, true);
+    try {
+      const values = await tensor.data();
+      return Array.from(values);
+    } finally {
+      tensor.dispose();
+    }
+  }
+
+  async function trainSpeciesMatcher() {
+    if (!state.records.length) {
+      $('importStatus').textContent = 'Import labelled bird photos first.';
+      return;
+    }
+    if (!state.featureModel) {
+      try { await loadAIModels(); } catch (error) { $('importStatus').textContent = 'AI models could not load: ' + error.message; return; }
+    }
+    const labelled = state.records.filter((record) => record.speciesLabel && !['Unlabelled', 'Unknown'].includes(record.speciesLabel.trim()));
+    if (!labelled.length) {
+      $('importStatus').textContent = 'No labelled photos found. Edit each image and assign its correct species first.';
+      return;
+    }
+    $('trainSpecies').disabled = true;
+    $('importStatus').textContent = 'Learning visual examples from ' + labelled.length + ' labelled photo(s)…';
+    state.trainingSamples = [];
+    let failed = 0;
+    try {
+      for (let i = 0; i < labelled.length; i++) {
+        const record = labelled[i];
+        try {
+          const image = new Image();
+          image.src = imageURL(record);
+          await new Promise((resolve, reject) => {
+            if (image.complete && image.naturalWidth) return resolve();
+            image.onload = resolve; image.onerror = () => reject(new Error('Image could not be decoded'));
+          });
+          const features = await extractFeatures(image);
+          state.trainingSamples.push({ label: record.speciesLabel.trim(), features, recordId: record.id });
+        } catch (error) {
+          failed++;
+          log('Skipped training image ' + record.filename + ': ' + error.message, 'warn');
+        }
+        $('importStatus').textContent = 'Learning ' + (i + 1) + ' / ' + labelled.length + ' · ' + state.trainingSamples.length + ' usable';
+        if (i % 4 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      state.trainingReady = state.trainingSamples.length > 0;
+      const labels = new Set(state.trainingSamples.map((sample) => sample.label));
+      $('classifierCapability').textContent = state.trainingReady ? labels.size + ' species learned' : 'Not trained';
+      $('classifierCapability').className = state.trainingReady ? 'good' : 'warn';
+      $('importStatus').textContent = 'Learned ' + state.trainingSamples.length + ' image example(s) across ' + labels.size + ' species · ' + failed + ' skipped. This is example-based matching, not full model-weight training.';
+      $('trainSpecies').textContent = 'Relearn from photos';
+      log('Species matcher ready: ' + state.trainingSamples.length + ' examples, ' + labels.size + ' species, ' + failed + ' images skipped.');
+    } finally {
+      $('trainSpecies').disabled = false;
+    }
+  }
+
+  async function classifyBirdCrop(prediction) {
+    if (!state.trainingReady || !state.featureModel) return { label: 'Bird', similarity: 0 };
+    const box = prediction.bbox;
+    const crop = document.createElement('canvas');
+    const side = 224;
+    crop.width = side; crop.height = side;
+    const cropCtx = crop.getContext('2d');
+    const x = Math.max(0, Math.floor(box[0]));
+    const y = Math.max(0, Math.floor(box[1]));
+    const w = Math.max(1, Math.min(video.videoWidth - x, Math.floor(box[2])));
+    const h = Math.max(1, Math.min(video.videoHeight - y, Math.floor(box[3])));
+    cropCtx.fillStyle = '#fff'; cropCtx.fillRect(0, 0, side, side);
+    cropCtx.drawImage(video, x, y, w, h, 0, 0, side, side);
+    const features = await extractFeatures(crop);
+    let best = null;
+    for (const sample of state.trainingSamples) {
+      const similarity = cosineSimilarity(features, sample.features);
+      if (!best || similarity > best.similarity) best = { label: sample.label, similarity };
+    }
+    return best && best.similarity >= 0.68 ? best : { label: 'Unmatched bird', similarity: best ? best.similarity : 0 };
+  }
+
+  async function runAIDetection() {
+    if (!state.detectorModel || state.aiBusy || Date.now() - state.aiLastRun < 450) return;
+    state.aiBusy = true;
+    state.aiLastRun = Date.now();
+    try {
+      const threshold = state.aiThreshold;
+      const predictions = await state.detectorModel.detect(video, 10, threshold);
+      const birds = predictions.filter((item) => item.class === 'bird' && item.score >= threshold);
+      const detections = [];
+      for (const prediction of birds.slice(0, 4)) {
+        let match = { label: 'Bird', similarity: 0 };
+        if (state.trainingReady) {
+          try { match = await classifyBirdCrop(prediction); }
+          catch (error) { log('Species matching failed: ' + error.message, 'warn'); }
+        }
+        detections.push({ prediction, match });
+      }
+      state.aiDetections = detections;
+      drawAIDetections();
+      $('birdCount').textContent = String(detections.length);
+      $('speciesMatchCount').textContent = String(detections.filter((item) => item.match.label !== 'Bird' && item.match.label !== 'Unmatched bird').length);
+      renderTracks();
+      if (detections.length && !state.trainingReady) {
+        $('aiStatus').textContent = detections.length + ' bird(s) detected. Train the species matcher to suggest species names.';
+      } else if (!detections.length) {
+        $('aiStatus').textContent = 'AI detector running. No birds detected in the latest frame.';
+      }
+    } catch (error) {
+      log('AI detection failed: ' + error.message, 'error');
+      $('aiStatus').textContent = 'AI detection error: ' + error.message;
+    } finally {
+      state.aiBusy = false;
+    }
+  }
+
+  function drawAIDetections() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (state.showMasks) {
+      state.masks.forEach((mask) => {
+        ctx.fillStyle = 'rgba(255,174,74,.18)'; ctx.strokeStyle = '#ffbd6b'; ctx.lineWidth = 2;
+        ctx.fillRect(mask.x * canvas.width, mask.y * canvas.height, mask.w * canvas.width, mask.h * canvas.height);
+        ctx.strokeRect(mask.x * canvas.width, mask.y * canvas.height, mask.w * canvas.width, mask.h * canvas.height);
+      });
+    }
+    if (!state.showMotion) return;
+    const sx = canvas.width / (video.videoWidth || canvas.width);
+    const sy = canvas.height / (video.videoHeight || canvas.height);
+    for (const item of state.aiDetections) {
+      const box = item.prediction.bbox;
+      const x = box[0] * sx, y = box[1] * sy, w = box[2] * sx, h = box[3] * sy;
+      ctx.strokeStyle = '#a7f36c'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
+      const pct = Math.round(item.prediction.score * 100);
+      const label = item.match.label === 'Bird' ? 'BIRD' : item.match.label.toUpperCase();
+      const text = label + ' ' + pct + '%';
+      ctx.font = 'bold 11px ui-monospace, monospace';
+      const labelWidth = ctx.measureText(text).width + 12;
+      ctx.fillStyle = '#a7f36c'; ctx.fillRect(x, Math.max(0, y - 21), labelWidth, 21);
+      ctx.fillStyle = '#10200d'; ctx.fillText(text, x + 6, Math.max(13, y - 7));
+    }
   }
 
   function isMasked(x, y) {
@@ -355,6 +547,27 @@
     });
   }
 
+  $('loadAI').addEventListener('click', () => loadAIModels().catch((error) => log('AI load error: ' + error.message, 'error')));
+  $('trainSpecies').addEventListener('click', trainSpeciesMatcher);
+  $('aiMode').addEventListener('click', () => {
+    state.detectionMode = 'ai';
+    $('aiMode').className = 'button primary'; $('motionMode').className = 'button secondary';
+    state.lastFrame = null; state.tracks = [];
+    drawAIDetections();
+    $('aiStatus').textContent = state.detectorModel ? 'AI bird detection selected.' : 'Load the AI models to begin object detection.';
+    log('Detection mode changed to AI bird detection.');
+  });
+  $('motionMode').addEventListener('click', () => {
+    state.detectionMode = 'motion';
+    $('motionMode').className = 'button primary'; $('aiMode').className = 'button secondary';
+    state.aiDetections = []; state.lastFrame = null;
+    drawOverlay(state.tracks);
+    log('Detection mode changed to optional motion tracking.');
+  });
+  $('aiThreshold').addEventListener('input', (event) => {
+    state.aiThreshold = Number(event.target.value) / 100;
+    $('aiThresholdValue').textContent = event.target.value + '%';
+  });
   $('startCamera').addEventListener('click', startCamera);
   $('stopCamera').addEventListener('click', stopCamera);
   $('resetTracks').addEventListener('click', () => {
@@ -658,7 +871,7 @@
     log('Wildlife Vision web app initialising.');
     log('Runtime: ' + navigator.userAgent);
     log('Secure context: ' + (window.isSecureContext ? 'yes' : 'no') + '.');
-    log('Detector model: unavailable. Frame differencing will report motion regions, not bird species.', 'warn');
+    log('AI bird detector will load on demand; motion tracking remains available as a secondary mode.');
     if (!window.isSecureContext) log('Use HTTPS (GitHub Pages) for camera access and SHA-256 duplicate checks.', 'warn');
     try {
       state.db = await openDatabase();
@@ -666,6 +879,7 @@
       $('storageLabel').textContent = 'Ready';
       setCameraCapability('Not started', 'neutral');
       log('Local database ready.');
+      $('trainSpecies').disabled = !state.records.some((record) => record.speciesLabel && !['Unlabelled', 'Unknown'].includes(record.speciesLabel.trim()));
     } catch (error) {
       $('storageLabel').textContent = 'Error';
       log('Local database initialisation failed: ' + error.message, 'error');

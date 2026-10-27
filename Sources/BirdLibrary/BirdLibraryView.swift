@@ -77,7 +77,7 @@ struct BirdLibraryView: View {
                 case .success(let urls):
                     Task { await store.importImages(urls) }
                 case .failure(let error):
-                    store.status = "Image selection failed: \\(error.localizedDescription)"
+                    store.status = "Image selection failed: \(error.localizedDescription)"
                 }
             }
             .sheet(item: $selectedRecord) { record in DatasetRecordEditor(record: record, store: store) }

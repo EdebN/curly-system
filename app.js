@@ -826,6 +826,40 @@
     $('maskCount').textContent = String(state.masks.length);
   }
 
+  function observationName(item) {
+    const learned = item.match && item.match.label && item.match.label !== 'Unmatched' ? item.match.label : '';
+    return learned || item.prediction.class || 'Unknown object';
+  }
+
+  function openObservationDetails(item, spatial) {
+    const dialog = $('observationDialog');
+    const body = $('observationDetails');
+    body.replaceChildren();
+    const rows = [
+      ['Detected name', observationName(item)],
+      ['Detector class', item.prediction.class || 'Not provided'],
+      ['Detector confidence', Math.round(clamp(item.prediction.score, 0, 1) * 100) + '%'],
+      ['Visual species match', item.match && item.match.similarity > 0 ? Math.round(clamp(item.match.similarity, 0, 1) * 100) + '% similarity' : 'No separate species match'],
+      ['Tracking ID', spatial ? '#' + spatial.id : 'Not currently tracked'],
+      ['Position in frame', spatial ? relativePosition(spatial.cx, spatial.cy) : 'Unavailable'],
+      ['Movement', spatial ? movementLabel(spatial) : 'Unavailable'],
+      ['Box size', Math.round(item.prediction.bbox[2]) + ' × ' + Math.round(item.prediction.bbox[3]) + ' pixels'],
+      ['Frame coverage', Math.round((item.prediction.bbox[2] / Math.max(1, video.videoWidth)) * 100) + '% wide × ' + Math.round((item.prediction.bbox[3] / Math.max(1, video.videoHeight)) * 100) + '% high']
+    ];
+    rows.forEach(([label, value]) => {
+      const row = document.createElement('div'); row.className = 'observation-detail-row';
+      const key = document.createElement('span'); key.textContent = label;
+      const val = document.createElement('strong'); val.textContent = value;
+      row.append(key, val); body.append(row);
+    });
+    $('observationDialogTitle').textContent = observationName(item);
+    $('observationConfidence').textContent = Math.round(clamp(item.prediction.score, 0, 1) * 100) + '% detector confidence';
+    $('observationNote').textContent = item.prediction.learned
+      ? 'This result comes from the example-based image matcher. Similarity is not a calibrated probability that the species identification is correct.'
+      : 'Detector confidence describes the model output, not a guarantee of correct identification. A generic label such as “bird” is not a species-level identification.';
+    dialog.showModal();
+  }
+
   function renderTracks() {
     const root = $('tracksList');
     root.replaceChildren();
@@ -837,16 +871,25 @@
       }
       root.className = 'track-list';
       state.aiDetections.forEach((item, index) => {
-        const card = document.createElement('div'); card.className = 'track-item';
-        const number = document.createElement('span'); number.className = 'track-number'; number.textContent = String(index + 1);
-        const info = document.createElement('div');
-        const title = document.createElement('strong'); title.textContent = item.match.label === 'Unmatched' ? (item.prediction.class || 'Object') + ' detected' : item.match.label;
-        const detail = document.createElement('small');
         const spatial = state.spatialTracks.find((track) => track.missed === 0 && track.item === item);
-        detail.textContent = 'Detector ' + Math.round(item.prediction.score * 100) + '% confidence' +
-          (item.match.similarity ? ' · visual match ' + Math.round(item.match.similarity * 100) + '%' : '') +
-          (spatial ? ' · ' + relativePosition(spatial.cx, spatial.cy) + ' · ' + movementLabel(spatial) : '');
-        info.append(title, detail); card.append(number, info); root.append(card);
+        const card = document.createElement('button');
+        card.type = 'button'; card.className = 'track-item observation-item';
+        card.setAttribute('aria-haspopup', 'dialog');
+        card.setAttribute('aria-label', 'View details for ' + observationName(item));
+        const number = document.createElement('span'); number.className = 'track-number';
+        number.textContent = spatial ? '#' + spatial.id : String(index + 1);
+        const info = document.createElement('span'); info.className = 'observation-info';
+        const title = document.createElement('strong'); title.className = 'observation-name'; title.textContent = observationName(item);
+        const detail = document.createElement('span'); detail.className = 'observation-meta';
+        const confidence = document.createElement('span'); confidence.className = 'confidence-pill';
+        confidence.textContent = Math.round(clamp(item.prediction.score, 0, 1) * 100) + '% sure';
+        const position = document.createElement('span'); position.className = 'observation-position';
+        position.textContent = spatial ? relativePosition(spatial.cx, spatial.cy) : 'Position unavailable';
+        const hint = document.createElement('span'); hint.className = 'observation-hint'; hint.textContent = 'Click for details';
+        detail.append(confidence, position);
+        info.append(title, detail, hint); card.append(number, info);
+        card.addEventListener('click', () => openObservationDetails(item, spatial));
+        root.append(card);
       });
       return;
     }
@@ -867,6 +910,11 @@
     });
   }
 
+  $('closeObservation').addEventListener('click', () => $('observationDialog').close());
+  $('closeObservationBottom').addEventListener('click', () => $('observationDialog').close());
+  $('observationDialog').addEventListener('click', (event) => {
+    if (event.target === $('observationDialog')) $('observationDialog').close();
+  });
   $('loadAI').addEventListener('click', () => loadAIModels().catch((error) => log('AI load error: ' + error.message, 'error')));
   $('loadRfDetr').addEventListener('click', () => loadRfDetrModel().catch((error) => log('RF-DETR load error: ' + error.message, 'error')));
   $('rfLabelsPicker').addEventListener('change', async (event) => {

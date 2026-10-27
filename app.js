@@ -457,29 +457,33 @@
     if (crypto.randomUUID) return crypto.randomUUID();
     return 'wv-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
   }
+  function isImageFile(file, path) {
+    const name = (path || file.name || '').toLowerCase();
+    return (file.type && file.type.startsWith('image/')) || /\\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(name);
+  }
+
   async function importFiles(fileList, folderMode) {
-    const files = Array.from(fileList || []).filter((file) => file.type.startsWith('image/'));
-    if (!files.length) { $('importStatus').textContent = 'No supported images selected.'; return; }
+    const files = Array.from(fileList || []).map((item) => item && item.file ? item : ({ file: item, relativePath: item.webkitRelativePath || item.name }))
+      .filter((item) => item.file && isImageFile(item.file, item.relativePath));
+    if (!files.length) { $('importStatus').textContent = 'No supported images found. Try a ZIP containing your species folders.'; return; }
     let imported = 0, duplicates = 0, failed = 0;
     $('importStatus').textContent = 'Importing ' + files.length + ' image(s)…';
     log('Import started for ' + files.length + ' image(s).');
     const hashes = new Set(state.records.map((record) => record.sha256));
     for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+      const item = files[i], file = item.file, relativePath = item.relativePath || file.name;
       try {
         const hash = await digestFile(file);
         if (hashes.has(hash)) { duplicates++; continue; }
         hashes.add(hash);
         let label = 'Unlabelled';
         if (folderMode) {
-          const relative = file.webkitRelativePath || file.name;
-          const parts = relative.split('/');
-          if (parts.length > 2 && parts[parts.length - 2]) label = parts[parts.length - 2];
+          const parts = relativePath.split('/').filter(Boolean);
+          if (parts.length > 1) label = parts[parts.length - 2] || label;
         }
         const record = {
           id: newId(), filename: file.name, sourceName: file.name,
-          relativePath: file.webkitRelativePath || file.name,
-          speciesLabel: label, split: 'unassigned', sha256: hash,
+          relativePath, speciesLabel: label, split: 'unassigned', sha256: hash,
           importedAt: Date.now(), box: null, blob: file
         };
         await dbRequest('readwrite', (store) => store.add(record));
@@ -496,11 +500,49 @@
     log('Import complete: ' + imported + ' added, ' + duplicates + ' duplicates skipped, ' + failed + ' failed.');
     renderLibrary();
   }
+
+  async function importZip(file) {
+    if (!window.JSZip) {
+      $('importStatus').textContent = 'ZIP support could not load. Check your internet connection and reload.';
+      log('JSZip library unavailable; ZIP import cannot run.', 'error');
+      return;
+    }
+    try {
+      $('importStatus').textContent = 'Opening ZIP archive…';
+      const zip = await window.JSZip.loadAsync(file);
+      const entries = Object.values(zip.files).filter((entry) => !entry.dir && isImageFile({name: entry.name, type: ''}, entry.name));
+      if (!entries.length) {
+        $('importStatus').textContent = 'No supported photos found inside that ZIP.';
+        log('ZIP contained no supported image files: ' + file.name, 'warn');
+        return;
+      }
+      $('importStatus').textContent = 'Extracting ' + entries.length + ' image(s)…';
+      const items = [];
+      for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const blob = await entry.async('blob');
+        const filename = entry.name.split('/').pop();
+        const mime = /\\.jpe?g$/i.test(filename) ? 'image/jpeg' : /\\.png$/i.test(filename) ? 'image/png' : /\\.webp$/i.test(filename) ? 'image/webp' : /\\.heic$/i.test(filename) ? 'image/heic' : /\\.heif$/i.test(filename) ? 'image/heif' : /\\.gif$/i.test(filename) ? 'image/gif' : 'application/octet-stream';
+        items.push({file: new File([blob], filename, {type: mime, lastModified: file.lastModified}), relativePath: entry.name});
+        if (i % 20 === 0) $('importStatus').textContent = 'Extracting ' + (i + 1) + ' of ' + entries.length + '…';
+      }
+      await importFiles(items, true);
+    } catch (error) {
+      $('importStatus').textContent = 'Could not read ZIP: ' + error.message;
+      log('ZIP import failed: ' + error.message, 'error');
+    }
+  }
+
   $('imagePicker').addEventListener('change', async (event) => {
     await importFiles(event.target.files, false); event.target.value = '';
   });
   $('folderPicker').addEventListener('change', async (event) => {
     await importFiles(event.target.files, true); event.target.value = '';
+  });
+  $('zipPicker').addEventListener('change', async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (file) await importZip(file);
+    event.target.value = '';
   });
 
   function imageURL(record) {

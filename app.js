@@ -137,7 +137,7 @@
     state.tracks = [];
     state.aiDetections = [];
     state.spatialTracks = [];
-    $('spatialCount').textContent = '0'; $('sceneSummary').textContent = 'No tracked objects in view';
+    $('spatialCount').textContent = '0'; $('sceneSummary').textContent = 'No moving objects or learned targets in view';
     $('birdCount').textContent = '0'; $('speciesMatchCount').textContent = '0';
     state.motionScore = 0;
     $('cameraPlaceholder').classList.remove('hidden');
@@ -534,7 +534,7 @@
       if (detections.length && !state.trainingReady) {
         $('aiStatus').textContent = detections.length + ' bird(s) detected. Train the species matcher to suggest species names.';
       } else if (!detections.length) {
-        $('aiStatus').textContent = 'AI detector running. No birds detected in the latest frame.';
+        $('aiStatus').textContent = 'No moving objects or learned species targets detected. Stationary generic objects are filtered.';
       }
     } catch (error) {
       log('AI detection failed: ' + error.message, 'error');
@@ -889,7 +889,7 @@
     if (state.detectionMode === 'ai' || state.detectionMode === 'rfdetr') {
       if (!state.aiDetections.length) {
         root.className = 'empty-state';
-        root.textContent = state.cameraRunning ? 'Waiting for AI detections. Birds must be visible and large enough for the model.' : 'Load the AI models and start the camera to detect birds.';
+        root.textContent = state.cameraRunning ? 'Waiting for moving objects or learned species targets. Stationary generic objects are hidden.' : 'Load the AI models and start the camera to detect relevant wildlife.';
         return;
       }
       root.className = 'track-list';

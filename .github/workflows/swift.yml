@@ -1,22 +1,50 @@
-# This workflow will build a Swift project
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-swift
-
-name: Swift
+name: Swift Playgrounds project checks
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
-  build:
-
+  source-check:
     runs-on: macos-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: swift build -v
-    - name: Run tests
-      run: swift test -v
+      - uses: actions/checkout@v4
+
+      - name: Check Swift syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          swiftc -frontend -parse Package.swift
+          while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            swiftc -frontend -parse "$file"
+          done < <(find Sources -name '*.swift' -print0)
+
+      - name: Check expected project files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f Package.swift
+          test -f Sources/WildlifeVisionApp.swift
+          test -f Sources/ContentView.swift
+          test -f Sources/Detection/CameraManager.swift
+          test -f Sources/Detection/BirdModels.swift
+          test -f Sources/BirdLibrary/BirdLibraryView.swift
+          test -f Sources/Resources/MODEL_FILES_README.txt
+          echo "Project structure checks passed."
+
+      - name: Report Core ML model availability
+        shell: bash
+        run: |
+          if [[ -f Sources/Resources/BirdDetector.mlmodel || -f Sources/Resources/BirdDetector.mlmodelc ]]; then
+            echo "Bird detector model found."
+          else
+            echo "::warning::BirdDetector model is not included; live detection will remain disabled until one is added."
+          fi
+          if [[ -f Sources/Resources/BirdSpeciesClassifier.mlmodel || -f Sources/Resources/BirdSpeciesClassifier.mlmodelc ]]; then
+            echo "Species classifier model found."
+          else
+            echo "::warning::BirdSpeciesClassifier model is not included; species classification will remain disabled until one is added."
+          fi

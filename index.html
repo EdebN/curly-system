@@ -36,7 +36,7 @@
     <section id="cameraPanel" class="panel active">
       <span id="trackCount" class="hidden">0</span><span id="maskCount" class="hidden">0</span>
       <div class="section-heading">
-        <div><p class="eyebrow">LIVE OBSERVATION</p><h2>Camera monitor</h2></div>
+        <div><p class="eyebrow">LIVE MONITOR · LOCAL PROCESSING</p><h2>Camera monitor</h2></div>
         <div class="live-pill"><span id="liveDot" class="status-dot"></span><span id="liveLabel">STANDBY</span></div>
       </div>
 
@@ -50,7 +50,8 @@
               <strong>Camera feed inactive</strong>
               <span>Start the camera and allow Safari to access it.</span>
             </div>
-            <div class="stage-chip chip-top"><span class="status-dot"></span> LIVE FEED</div>
+            <div class="stage-chip chip-top"><span class="status-dot"></span> CAM 01 · LIVE FEED</div>
+            <div class="stage-chip chip-right" id="detectionReadout">OBJECTS 0</div>
             <div class="stage-chip chip-bottom" id="motionReadout">MOTION 0.0%</div>
             <div class="fullscreen-tools" id="fullscreenTools" aria-label="Camera fullscreen controls">
               <button id="fullscreenZoomOut" class="mini-control" type="button" aria-label="Zoom out">−</button>
@@ -59,6 +60,12 @@
               <button id="fullscreenZoomReset" class="mini-control reset-control" type="button">RESET</button>
               <button id="fullscreenToggle" class="mini-control fullscreen-button" type="button" aria-label="Enter fullscreen">FULLSCREEN</button>
             </div>
+          </div>
+          <div class="telemetry-strip" aria-label="Camera performance">
+            <div class="telemetry-item"><span>INPUT</span><strong id="cameraResolution">NO SIGNAL</strong></div>
+            <div class="telemetry-item"><span>INFERENCE</span><strong id="inferenceLatency">—</strong></div>
+            <div class="telemetry-item"><span>DETECTIONS</span><strong id="detectionTotal">0</strong></div>
+            <div class="telemetry-item"><span>ENGINE</span><strong id="modelReadout">MODEL OFFLINE</strong></div>
           </div>
           <div class="camera-controls">
             <button id="fullscreenToggleOutside" class="button secondary" type="button" aria-label="Enter camera fullscreen">Enter fullscreen</button>
@@ -124,7 +131,7 @@
         </aside>
       </div>
       <div class="card tracks-card">
-        <div class="card-heading"><div><p class="eyebrow">CURRENT OBSERVATIONS</p><h3>Detected birds</h3></div><span class="muted small">Labels are visual-match estimates, not certainty</span></div>
+        <div class="card-heading"><div><p class="eyebrow">LIVE EVENT LIST</p><h3>Active detections</h3></div><span class="muted small">Confidence is a model estimate</span></div>
         <div id="tracksList" class="empty-state">Load the AI models and start the camera to detect birds.</div>
       </div>
     </section>

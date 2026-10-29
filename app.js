@@ -548,25 +548,32 @@
   }
 
   async function scanForLearnedObjects() {
-    if (!state.trainingReady || !state.featureModel || Date.now() - state.lastLearnedScan < 2200) return [];
-    state.lastLearnedScan = Date.now();
+    if (!state.trainingReady || !state.featureModel) return [];
     const vw = video.videoWidth, vh = video.videoHeight;
     if (!vw || !vh) return [];
+    // Run the full learned scan on every AI cycle rather than throttling it to
+    // once every 2.2 seconds. COCO-SSD still supplies object proposals; this
+    // scan independently checks the six broad regions for learned targets.
+    state.lastLearnedScan = Date.now();
     const side = Math.floor(Math.min(vw, vh) * 0.52);
     const xs = [0, Math.max(0, Math.floor((vw - side) / 2)), Math.max(0, vw - side)];
     const ys = [0, Math.max(0, vh - side)];
     const candidates = [];
     for (const y of ys) for (const x of xs) candidates.push([x, y, Math.min(side, vw - x), Math.min(side, vh - y)]);
-    let best = null;
+    const hits = [];
     for (const box of candidates) {
       const match = await classifyCropBox(box);
-      if (match.label !== 'Unmatched' && (!best || match.similarity > best.match.similarity)) best = { box, match };
+      if (match.label !== 'Unmatched') {
+        hits.push({
+          prediction: { bbox: box, score: match.similarity, class: match.label, learned: true },
+          match
+        });
+      }
     }
-    if (!best) return [];
-    return [{
-      prediction: { bbox: best.box, score: best.match.similarity, class: best.match.label, learned: true },
-      match: best.match
-    }];
+    // Keep the strongest learned region for this cycle to avoid flooding the
+    // tracker with overlapping broad crops of the same subject.
+    hits.sort((a, b) => b.match.similarity - a.match.similarity);
+    return hits.length ? [hits[0]] : [];
   }
 
   async function runAIDetection() {
@@ -615,7 +622,7 @@
         }
         detections.push({ prediction: candidate.prediction, match });
       }
-      if (state.trainingReady && Date.now() - state.lastLearnedScan >= 2200) {
+      if (state.trainingReady) {
         try {
           const learnedHits = await scanForLearnedObjects();
           if (learnedHits.length) {
@@ -623,7 +630,7 @@
             const box = hit.prediction.bbox;
             const overlaps = detections.some((item) => {
               const b = item.prediction.bbox;
-              const cx = (box[0] + box[2] / 2), cy = (box[1] + box[3] / 2);
+              const cx = box[0] + box[2] / 2, cy = box[1] + box[3] / 2;
               return cx >= b[0] && cx <= b[0] + b[2] && cy >= b[1] && cy <= b[1] + b[3];
             });
             if (!overlaps) detections.push(hit);

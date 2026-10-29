@@ -10,7 +10,7 @@
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
     objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
-    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, rfSession: null, rfLabels: [], rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded", spatialTracks: [], nextSpatialId: 1, showSpatialGrid: true, showTrails: true, showCoordinates: true
+    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, lastInferenceMs: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, rfSession: null, rfLabels: [], rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded", spatialTracks: [], nextSpatialId: 1, showSpatialGrid: true, showTrails: true, showCoordinates: true
   };
 
   const video = $('cameraVideo');
@@ -91,6 +91,7 @@
       setStatus('Camera live', true);
       setCameraCapability('Granted', 'good');
       log('Camera started: ' + (video.videoWidth || '?') + ' × ' + (video.videoHeight || '?') + '.');
+      updatePerformanceReadout();
       inspectZoomCapabilities();
       sizeCanvases();
       if (!state.detectorModel) loadAIModels().catch((error) => log("AI model loading failed: " + error.message, "error"));
@@ -144,6 +145,8 @@
     $('spatialCount').textContent = '0'; $('sceneSummary').textContent = 'No moving objects or learned targets in view';
     $('birdCount').textContent = '0'; $('speciesMatchCount').textContent = '0';
     state.motionScore = 0;
+    $('detectionReadout').textContent = 'OBJECTS 0';
+    updatePerformanceReadout();
     $('cameraPlaceholder').classList.remove('hidden');
     $('startCamera').disabled = false;
     $('stopCamera').disabled = true;
@@ -284,6 +287,8 @@
 
   function processFrame() {
     if (!state.cameraRunning) return;
+    // Pause expensive work when this tab is backgrounded.
+    if (document.hidden) { state.raf = 0; return; }
     if (state.detectionMode === "ai" || state.detectionMode === "rfdetr") {
       if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) runAIDetection();
       state.raf = requestAnimationFrame(processFrame);
@@ -565,10 +570,20 @@
   }
 
   async function runAIDetection() {
-    if (state.detectionMode === 'rfdetr') { await runRfDetrDetection(); return; }
-    if (!state.detectorModel || state.aiBusy || Date.now() - state.aiLastRun < 450) return;
+    if (state.detectionMode === 'rfdetr') {
+      if (state.rfBusy) return;
+      const rfStarted = performance.now();
+      await runRfDetrDetection();
+      state.lastInferenceMs = performance.now() - rfStarted;
+      updatePerformanceReadout();
+      return;
+    }
+    // Back off when inference and learned matching take longer on slower devices.
+    const interval = state.lastInferenceMs ? Math.max(450, Math.min(1200, state.lastInferenceMs * 1.3)) : 450;
+    if (!state.detectorModel || state.aiBusy || Date.now() - state.aiLastRun < interval) return;
     state.aiBusy = true;
     state.aiLastRun = Date.now();
+    const inferenceStarted = performance.now();
     try {
       const threshold = state.aiThreshold;
       // Ask COCO-SSD for lower-confidence candidates too. A quiet, partly occluded
@@ -622,6 +637,8 @@
       $('birdCount').textContent = String(state.aiDetections.length);
       $('speciesMatchCount').textContent = String(state.aiDetections.filter(isPriorityLearnedDetection).length);
       renderTracks();
+      $('detectionReadout').textContent = 'OBJECTS ' + state.aiDetections.length;
+      updatePerformanceReadout();
       if (detections.length && !state.trainingReady) {
         $('aiStatus').textContent = detections.length + ' bird(s) detected. Train the species matcher to suggest species names.';
       } else if (!detections.length) {
@@ -631,8 +648,21 @@
       log('AI detection failed: ' + error.message, 'error');
       $('aiStatus').textContent = 'AI detection error: ' + error.message;
     } finally {
+      state.lastInferenceMs = performance.now() - inferenceStarted;
+      updatePerformanceReadout();
       state.aiBusy = false;
     }
+  }
+
+  function updatePerformanceReadout() {
+    if (!$('inferenceLatency')) return;
+    $('inferenceLatency').textContent = state.lastInferenceMs > 0 ? Math.round(state.lastInferenceMs) + ' ms' : '—';
+    $('cameraResolution').textContent = video.videoWidth && video.videoHeight ? video.videoWidth + ' × ' + video.videoHeight : 'NO SIGNAL';
+    $('detectionTotal').textContent = String(state.aiDetections.length);
+    $('detectionReadout').textContent = 'OBJECTS ' + state.aiDetections.length;
+    $('modelReadout').textContent = state.detectionMode === 'rfdetr'
+      ? (state.rfSession ? 'RF-DETR' : 'RF-DETR OFFLINE')
+      : (state.detectorModel ? 'COCO-SSD' : 'MODEL OFFLINE');
   }
 
   function updateSpatialTracks(detections) {
@@ -1400,6 +1430,17 @@
       $('importStatus').textContent = 'Local storage failed: ' + error.message;
     }
   }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      if (state.raf) cancelAnimationFrame(state.raf);
+      state.raf = 0;
+    } else if (state.cameraRunning && !state.raf) {
+      state.lastFrame = null;
+      state.raf = requestAnimationFrame(processFrame);
+      log('Camera processing resumed in foreground.');
+    }
+    updatePerformanceReadout();
+  });
   window.addEventListener('pagehide', () => {
     if (state.raf) cancelAnimationFrame(state.raf);
     if (state.stream) state.stream.getTracks().forEach((track) => track.stop());

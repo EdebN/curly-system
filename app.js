@@ -583,6 +583,7 @@
       }
       state.trainingReady = state.trainingSamples.length > 0;
       state.hasSavedTraining = state.trainingReady;
+      $('exportModel').disabled = !state.hasSavedTraining;
       const labels = new Set(state.trainingSamples.map(sample => sample.label));
       $('classifierCapability').textContent = state.trainingReady ? labels.size + ' species learned' : 'Not trained';
       $('classifierCapability').className = state.trainingReady ? 'good' : 'warn';

@@ -1191,18 +1191,46 @@
   }
   function dbRequest(mode, action) {
     return new Promise((resolve, reject) => {
-      const tx = state.db.transaction('images', mode);
-      const store = tx.objectStore('images');
-      let req;
-      try { req = action(store); } catch (error) { reject(error); return; }
+      let tx, req, result, settled = false;
+      const fail = (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error || new Error('Database transaction failed.'));
+      };
+      try {
+        tx = state.db.transaction('images', mode);
+        req = action(tx.objectStore('images'));
+      } catch (error) { fail(error); return; }
       if (req) {
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error || new Error('Database operation failed.'));
-      } else {
-        tx.oncomplete = () => resolve(true);
-        tx.onerror = () => reject(tx.error || new Error('Database transaction failed.'));
+        req.onsuccess = () => { result = req.result; };
+        req.onerror = () => fail(req.error || new Error('Database operation failed.'));
       }
+      tx.oncomplete = () => {
+        if (settled) return;
+        settled = true;
+        resolve(req ? result : true);
+      };
+      tx.onerror = () => fail(tx.error || (req && req.error) || new Error('Database transaction failed.'));
+      tx.onabort = () => fail(tx.error || (req && req.error) || new Error('Database transaction was aborted.'));
     });
+  }
+
+  async function reportStorageUsage() {
+    if (!navigator.storage || !navigator.storage.estimate) return;
+    try {
+      const estimate = await navigator.storage.estimate();
+      const used = Number(estimate.usage || 0), quota = Number(estimate.quota || 0);
+      const mb = (bytes) => (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+      if (quota > 0) {
+        const percent = Math.round(used / quota * 100);
+        log('Browser storage: ' + mb(used) + ' used of ' + mb(quota) + ' available quota (' + percent + '%).');
+        if (percent >= 85) log('Browser storage is nearly full. More imports may fail until space is freed.', 'warn');
+      } else {
+        log('Browser storage usage: ' + mb(used) + '. Quota is not reported by this browser.');
+      }
+    } catch (error) {
+      log('Could not read browser storage estimate: ' + error.message, 'warn');
+    }
   }
   async function loadRecords() {
     state.records = await dbRequest('readonly', (store) => store.getAll());
@@ -1232,6 +1260,7 @@
     let imported = 0, duplicates = 0, failed = 0;
     $('importStatus').textContent = 'Importing ' + files.length + ' image(s)…';
     log('Import started for ' + files.length + ' image(s).');
+    await reportStorageUsage();
     const hashes = new Set(state.records.map((record) => record.sha256));
     for (let i = 0; i < files.length; i++) {
       const item = files[i], file = item.file, relativePath = item.relativePath || file.name;
@@ -1253,7 +1282,7 @@
         state.records.unshift(record); imported++;
       } catch (error) {
         failed++;
-        log('Could not import ' + file.name + ': ' + error.message, 'warn');
+        log('Could not import ' + file.name + ' (' + (file.size / (1024 * 1024)).toFixed(2) + ' MB): ' + error.name + ': ' + error.message, 'warn');
       }
       if (i % 8 === 0) $('importStatus').textContent = 'Processing ' + (i + 1) + ' of ' + files.length + '…';
     }
@@ -1261,6 +1290,7 @@
     $('duplicateTotal').textContent = String(state.duplicateCount);
     $('importStatus').textContent = 'Imported ' + imported + ' · skipped ' + duplicates + ' duplicates · failed ' + failed + '. Review the labels before using this as training data.';
     log('Import complete: ' + imported + ' added, ' + duplicates + ' duplicates skipped, ' + failed + ' failed.');
+    await reportStorageUsage();
     renderLibrary();
   }
 

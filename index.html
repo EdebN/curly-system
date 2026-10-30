@@ -171,7 +171,7 @@
       <div id="selectionBar" class="selection-bar hidden">
         <strong id="selectionCount">0 selected</strong>
         <button id="selectAllButton" class="button secondary tiny">Select all</button>
-        <button id="bulkChangeLabelButton" class="button primary tiny" disabled>Change label</button>
+        <button id="bulkChangeLabelButton" class="button primary tiny" disabled>Rename</button>
         <button id="cancelSelectionButton" class="button secondary tiny">Cancel</button>
       </div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
@@ -216,11 +216,11 @@
   <script src="./app.js" defer></script>
   <dialog id="bulkLabelDialog" class="edit-dialog">
     <form id="bulkLabelForm">
-      <div class="dialog-heading"><div><p class="eyebrow">BULK EDIT</p><h2>Change image label</h2></div><button class="icon-button" type="button" aria-label="Close" data-close-bulk-dialog>×</button></div>
-      <p class="muted small">This label will be applied to every selected image.</p>
-      <label class="form-label" for="bulkLabelInput">New species label</label>
+      <div class="dialog-heading"><div><p class="eyebrow">BULK EDIT</p><h2>Rename selected images</h2></div><button class="icon-button" type="button" aria-label="Close" data-close-bulk-dialog>×</button></div>
+      <p class="muted small">The new name will be applied to every selected image.</p>
+      <label class="form-label" for="bulkLabelInput">New name</label>
       <input id="bulkLabelInput" class="text-input" maxlength="120" required placeholder="e.g. Australian magpie">
-      <div class="dialog-actions"><button class="button secondary" type="button" onclick="document.getElementById('bulkLabelDialog').close()">Cancel</button><button id="saveBulkLabelButton" class="button primary" type="submit">Save label</button></div>
+      <div class="dialog-actions"><button class="button secondary" type="button" onclick="document.getElementById('bulkLabelDialog').close()">Cancel</button><button id="saveBulkLabelButton" class="button primary" type="submit">Rename images</button></div>
     </form>
   </dialog>
 </body>

@@ -478,6 +478,39 @@
     }
   }
 
+  function exportSpeciesModel() {
+    if (!state.trainingSamples.length) {
+      $('importStatus').textContent = 'Learn from labelled photos or import a trained model first.';
+      return;
+    }
+    const labels = [...new Set(state.trainingSamples.map(sample => sample.label))].sort();
+    const payload = {
+      format: 'wildlifevision-species-matcher',
+      version: 1,
+      featureModel: 'MobileNetV2-alpha1',
+      featureDescription: 'MobileNetV2 alpha=1.0 spatially pooled feature vectors; example-based cosine similarity matcher.',
+      createdAt: new Date().toISOString(),
+      exampleCount: state.trainingSamples.length,
+      species: labels,
+      samples: state.trainingSamples.map(sample => ({
+        label: sample.label,
+        features: Array.from(sample.features),
+        recordId: sample.recordId ?? null
+      }))
+    };
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'wildlifevision-species-model.wvmodel';
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    $('importStatus').textContent = 'Exported ' + payload.exampleCount + ' learned examples across ' + labels.length + ' species.';
+    log('Exported portable species matcher: ' + payload.exampleCount + ' examples across ' + labels.length + ' species.');
+  }
+
   async function trainSpeciesMatcher() {
     if (!state.records.length) {
       $('importStatus').textContent = 'Import labelled bird photos first.';
@@ -1114,6 +1147,43 @@
     state.lastFrame = null; log('Detection mode changed to RF-DETR ONNX.');
   });
   $('trainSpecies').addEventListener('click', trainSpeciesMatcher);
+  $('exportModel').addEventListener('click', exportSpeciesModel);
+  $('modelPicker').addEventListener('change', async (event) => {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    try {
+      const model = JSON.parse(await file.text());
+      if (model.format !== 'wildlifevision-species-matcher' || model.version !== 1 ||
+          model.featureModel !== 'MobileNetV2-alpha1' || !Array.isArray(model.samples) || !model.samples.length) {
+        throw new Error('This file is not a supported WildlifeVision species model.');
+      }
+      const valid = model.samples.every(sample =>
+        typeof sample.label === 'string' && sample.label.trim() &&
+        Array.isArray(sample.features) && sample.features.length > 0 &&
+        sample.features.every(value => Number.isFinite(value))
+      );
+      if (!valid) throw new Error('The model contains invalid feature data.');
+      const dimensions = model.samples[0].features.length;
+      if (!model.samples.every(sample => sample.features.length === dimensions)) {
+        throw new Error('The model contains inconsistent feature dimensions.');
+      }
+      state.trainingSamples = model.samples.map(sample => ({
+        label: sample.label.trim(), features: sample.features, recordId: sample.recordId ?? null
+      }));
+      state.trainingReady = true;
+      const labels = new Set(state.trainingSamples.map(sample => sample.label));
+      $('classifierCapability').textContent = labels.size + ' species learned';
+      $('classifierCapability').className = 'good';
+      $('importStatus').textContent = 'Imported model: ' + state.trainingSamples.length + ' examples across ' + labels.size + ' species.';
+      $('exportModel').disabled = false;
+      log('Imported species matcher: ' + state.trainingSamples.length + ' examples across ' + labels.size + ' species.');
+    } catch (error) {
+      $('importStatus').textContent = 'Model import failed: ' + error.message;
+      log('Species model import failed: ' + error.message, 'error');
+    } finally {
+      event.target.value = '';
+    }
+  });
   $('aiMode').addEventListener('click', () => {
     state.detectionMode = 'ai';
     $('aiMode').className = 'button primary'; $('rfMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
@@ -1443,6 +1513,7 @@
     $('speciesTotal').textContent = String(species.size);
     $('boxTotal').textContent = String(state.records.filter((record) => record.box).length);
     $('exportCsv').disabled = !state.records.length;
+    $('exportModel').disabled = !state.trainingSamples.length;
     $('clearLibrary').disabled = !state.records.length;
     selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
     const root = $('imageGrid'); root.replaceChildren();

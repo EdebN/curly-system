@@ -141,3 +141,6 @@ input[type=range],.toggle-setting input{accent-color:#a7e5bd}
 .selection-bar.hidden{display:none!important}.selection-bar strong{font-size:11px;white-space:nowrap}
 .image-card{position:relative;cursor:default;transition:border-color .12s,transform .12s}.image-card.selection-mode{cursor:pointer}.image-card.selected{border-color:var(--green);box-shadow:0 0 0 2px var(--green)}.selection-tick{display:none;position:absolute;top:9px;right:9px;z-index:2;width:25px;height:25px;border-radius:50%;align-items:center;justify-content:center;border:2px solid #e9eee9;background:#172019aa;color:transparent;font-size:15px;font-weight:900}.image-card.selection-mode .selection-tick{display:flex}.image-card.selected .selection-tick{background:var(--green);border-color:var(--green);color:#142010}.image-card.selection-mode .edit-button{pointer-events:none;opacity:.45}
 @media(max-width:600px){.selection-bar{position:sticky;bottom:8px;width:100%;gap:6px;padding:8px}.selection-bar .button{padding:9px 10px;font-size:10px}.selection-bar strong{font-size:10px}}
+
+/* Drag-to-select dataset images. */
+.image-card.selection-mode{touch-action:none;user-select:none;-webkit-user-select:none}.image-card.selection-mode img{pointer-events:none}.image-card.selected .selection-tick{display:flex}.selection-bar{justify-content:flex-start}

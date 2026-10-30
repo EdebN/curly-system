@@ -156,6 +156,9 @@
           <label class="button secondary file-button">Import species folder (supported browsers)<input id="folderPicker" type="file" accept="image/*,.heic,.heif,.avif,.tif,.tiff,.bmp" webkitdirectory directory multiple></label>
           <button id="clearLibrary" class="button danger-outline">Clear library</button>
         </div>
+        <label class="form-label" for="importLabel">Label for these imported images</label>
+        <input id="importLabel" class="text-input import-label-input" maxlength="120" placeholder="e.g. Australian magpie (leave blank to use folder names)">
+        <p class="helper">If you select several individual images, this label is applied to all of them. For folder imports, leave it blank to use each folder's name.</p>
         <p id="importStatus" class="helper" role="status">Your library is empty.</p>
       </div>
       <div class="library-toolbar">
@@ -163,6 +166,13 @@
         <select id="splitFilter" class="select-input" aria-label="Filter by dataset split">
           <option value="all">All splits</option><option value="unassigned">Unassigned</option><option value="train">Train</option><option value="validation">Validation</option><option value="test">Test</option>
         </select>
+      </div>
+      <div class="bulk-toolbar">
+        <div><strong id="bulkSelectionCount">0 selected</strong><span class="helper">Select images, then apply one label to all of them.</span></div>
+        <button id="selectVisible" class="button secondary tiny">Select visible</button>
+        <button id="clearSelection" class="button secondary tiny" disabled>Clear selection</button>
+        <input id="bulkLabel" class="text-input" maxlength="120" placeholder="New label for selected images">
+        <button id="applyBulkLabel" class="button primary tiny" disabled>Apply label</button>
       </div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
     </section>

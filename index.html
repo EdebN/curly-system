@@ -139,7 +139,7 @@
     <section id="libraryPanel" class="panel">
       <div class="section-heading">
         <div><p class="eyebrow">LOCAL DATASET</p><h2>Bird image library</h2><p class="muted">Images and labels are stored in this browser on this device using IndexedDB.</p></div>
-        <div class="library-heading-actions"><button id="trainSpecies" class="button primary">Learn from labelled photos</button><button id="exportCsv" class="button secondary" disabled>Export CSV</button></div>
+        <div class="library-heading-actions"><button id="trainSpecies" class="button primary">Learn from labelled photos</button><button id="exportModel" class="button secondary" disabled>Export trained model</button><label class="button secondary file-button">Import trained model<input id="modelPicker" type="file" accept=".wvmodel,.json,application/json"></label><button id="exportCsv" class="button secondary" disabled>Export CSV</button></div>
       </div>
       <div class="library-metrics">
         <div class="metric-card"><span class="metric-label">Images</span><strong id="imageTotal">0</strong></div>

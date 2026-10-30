@@ -525,35 +525,45 @@
   }
 
   async function trainSpeciesMatcher() {
-    if (!state.records.length) {
-      $('importStatus').textContent = 'Import labelled bird photos first.';
+    const labelled = state.records.filter((record) => record.speciesLabel && !['Unlabelled', 'Unknown'].includes(record.speciesLabel.trim()));
+    if (!labelled.length) {
+      const saved = state.db ? await trainingStoreRequest('readonly', store => store.get('speciesMatcher')) : null;
+      if (saved && Array.isArray(saved.samples) && saved.samples.length) {
+        state.trainingSamples = saved.samples;
+        state.trainingReady = true;
+        state.hasSavedTraining = true;
+        $('importStatus').textContent = 'Your imported model already contains ' + saved.samples.length + ' examples. Add labelled photos to extend it.';
+      } else {
+        $('importStatus').textContent = 'Import and label photos first, or import an existing trained model.';
+      }
       return;
     }
     if (!state.featureModel) {
       try { await loadAIModels(); } catch (error) { $('importStatus').textContent = 'AI models could not load: ' + error.message; return; }
     }
-    const labelled = state.records.filter((record) => record.speciesLabel && !['Unlabelled', 'Unknown'].includes(record.speciesLabel.trim()));
-    if (!labelled.length) {
-      $('importStatus').textContent = 'No labelled photos found. Edit each image and assign its correct species first.';
-      return;
-    }
     $('trainSpecies').disabled = true;
-    const fingerprint = labelled.map((record) => String(record.id) + ':' + record.speciesLabel.trim()).join('|');
-    $('importStatus').textContent = 'Preparing resumable learning for ' + labelled.length + ' labelled photos…';
+    $('importStatus').textContent = 'Preparing to add new examples to your existing model…';
     let failed = 0;
     try {
       const saved = await trainingStoreRequest('readonly', store => store.get('speciesMatcher'));
-      const checkpoint = saved && saved.fingerprint === fingerprint ? saved : null;
-      state.trainingSamples = checkpoint && Array.isArray(checkpoint.samples) ? checkpoint.samples : [];
-      let startAt = checkpoint ? Math.min(checkpoint.nextIndex || 0, labelled.length) : 0;
-      if (!checkpoint) {
-        await trainingStoreRequest('readwrite', store => store.delete('speciesMatcher'));
-        log('Starting a new training pass. Previous checkpoint did not match the current labelled dataset.');
-      } else if (startAt > 0) {
-        log('Resuming training at image ' + (startAt + 1) + ' of ' + labelled.length + ' using saved progress.');
+      state.trainingSamples = saved && Array.isArray(saved.samples)
+        ? saved.samples
+        : (Array.isArray(state.trainingSamples) ? state.trainingSamples : []);
+      const processedIds = new Set(saved && Array.isArray(saved.processedRecordIds)
+        ? saved.processedRecordIds
+        : state.trainingSamples.map(sample => sample.recordId).filter(id => id != null));
+      failed = Number(saved && saved.failed) || 0;
+      const pending = labelled.filter(record => !processedIds.has(record.id));
+      if (!pending.length) {
+        state.trainingReady = state.trainingSamples.length > 0;
+        state.hasSavedTraining = state.trainingReady;
+        $('exportModel').disabled = !state.hasSavedTraining;
+        $('importStatus').textContent = 'No new labelled photos to learn. Existing model: ' + state.trainingSamples.length + ' examples.';
+        return;
       }
-      for (let i = startAt; i < labelled.length; i++) {
-        const record = labelled[i];
+      log('Incremental learning: retaining ' + state.trainingSamples.length + ' existing examples and processing ' + pending.length + ' new labelled photos.');
+      for (let i = 0; i < pending.length; i++) {
+        const record = pending[i];
         let bitmap = null;
         try {
           bitmap = await createImageBitmap(record.blob);
@@ -566,19 +576,21 @@
           if (bitmap && bitmap.close) bitmap.close();
           bitmap = null;
         }
-        const completed = i + 1;
-        $('importStatus').textContent = 'Learning ' + completed + ' / ' + labelled.length + ' · ' + state.trainingSamples.length + ' usable · checkpoint saved every 10';
-        if (completed % 10 === 0 || completed === labelled.length) {
+        processedIds.add(record.id);
+        $('importStatus').textContent = 'Adding examples ' + (i + 1) + ' / ' + pending.length + ' · ' + state.trainingSamples.length + ' total examples';
+        if ((i + 1) % 10 === 0 || i + 1 === pending.length) {
           await trainingStoreRequest('readwrite', store => store.put({
-            key: 'speciesMatcher', fingerprint, nextIndex: completed,
-            samples: state.trainingSamples, failed
+            key: 'speciesMatcher',
+            samples: state.trainingSamples,
+            processedRecordIds: Array.from(processedIds),
+            failed,
+            updatedAt: new Date().toISOString()
           }));
           if (window.tf && window.tf.memory) {
             const memory = window.tf.memory();
-            log('Training checkpoint ' + completed + '/' + labelled.length + ' · TensorFlow tensors: ' + memory.numTensors + ', estimated GPU/CPU memory: ' + Math.round(memory.numBytes / 1048576) + ' MB.');
+            log('Incremental checkpoint ' + (i + 1) + '/' + pending.length + ' · tensors: ' + memory.numTensors + ', estimated memory: ' + Math.round(memory.numBytes / 1048576) + ' MB.');
           }
         }
-        // Yield after every image so Safari can paint progress and reclaim decoded image memory.
         await new Promise(resolve => setTimeout(resolve, 0));
       }
       state.trainingReady = state.trainingSamples.length > 0;
@@ -587,12 +599,12 @@
       const labels = new Set(state.trainingSamples.map(sample => sample.label));
       $('classifierCapability').textContent = state.trainingReady ? labels.size + ' species learned' : 'Not trained';
       $('classifierCapability').className = state.trainingReady ? 'good' : 'warn';
-      $('importStatus').textContent = 'Learned ' + state.trainingSamples.length + ' image example(s) across ' + labels.size + ' species · ' + failed + ' skipped. Progress is saved locally.';
-      $('trainSpecies').textContent = 'Relearn from photos';
-      log('Species matcher ready: ' + state.trainingSamples.length + ' examples, ' + labels.size + ' species, ' + failed + ' images skipped.');
+      $('importStatus').textContent = 'Model updated: ' + state.trainingSamples.length + ' total examples across ' + labels.size + ' species · ' + failed + ' skipped. Progress is saved locally.';
+      $('trainSpecies').textContent = 'Add new photos to model';
+      log('Incremental learning complete: ' + state.trainingSamples.length + ' total examples across ' + labels.size + ' species.');
     } catch (error) {
-      $('importStatus').textContent = 'Learning paused at ' + state.trainingSamples.length + ' examples. Progress was checkpointed where possible. Press Learn again to resume. Error: ' + error.message;
-      log('Training paused: ' + error.message, 'error');
+      $('importStatus').textContent = 'Learning paused. Existing model retained; progress was checkpointed where possible. Error: ' + error.message;
+      log('Incremental learning paused: ' + error.message, 'error');
     } finally {
       $('trainSpecies').disabled = false;
     }
@@ -1182,17 +1194,42 @@
       if (!model.samples.every(sample => sample.features.length === dimensions)) {
         throw new Error('The model contains inconsistent feature dimensions.');
       }
-      state.trainingSamples = model.samples.map(sample => ({
+      const importedSamples = model.samples.map(sample => ({
         label: sample.label.trim(), features: sample.features, recordId: sample.recordId ?? null
       }));
+      const existing = state.db ? await trainingStoreRequest('readonly', store => store.get('speciesMatcher')) : null;
+      const combined = [...(existing && Array.isArray(existing.samples) ? existing.samples : []), ...importedSamples];
+      const seen = new Set();
+      const merged = combined.filter(sample => {
+        const key = sample.recordId != null
+          ? sample.label + '|id|' + sample.recordId
+          : sample.label + '|feature|' + sample.features.length + '|' + sample.features[0] + '|' + sample.features[Math.floor(sample.features.length / 2)] + '|' + sample.features[sample.features.length - 1];
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      const processedRecordIds = new Set(existing && Array.isArray(existing.processedRecordIds)
+        ? existing.processedRecordIds
+        : (existing && Array.isArray(existing.samples) ? existing.samples.map(sample => sample.recordId).filter(id => id != null) : []));
+      importedSamples.forEach(sample => { if (sample.recordId != null) processedRecordIds.add(sample.recordId); });
+      if (state.db) {
+        await trainingStoreRequest('readwrite', store => store.put({
+          key: 'speciesMatcher',
+          samples: merged,
+          processedRecordIds: Array.from(processedRecordIds),
+          failed: Number(existing && existing.failed) || 0,
+          updatedAt: new Date().toISOString()
+        }));
+      }
+      state.trainingSamples = merged;
       state.trainingReady = true;
       state.hasSavedTraining = true;
       const labels = new Set(state.trainingSamples.map(sample => sample.label));
       $('classifierCapability').textContent = labels.size + ' species learned';
       $('classifierCapability').className = 'good';
-      $('importStatus').textContent = 'Imported model: ' + state.trainingSamples.length + ' examples across ' + labels.size + ' species.';
+      $('importStatus').textContent = 'Imported and saved model: ' + state.trainingSamples.length + ' examples across ' + labels.size + ' species. New labelled photos can now be added.';
       $('exportModel').disabled = false;
-      log('Imported species matcher: ' + state.trainingSamples.length + ' examples across ' + labels.size + ' species.');
+      log('Imported species matcher and saved locally: ' + state.trainingSamples.length + ' examples across ' + labels.size + ' species.');
     } catch (error) {
       $('importStatus').textContent = 'Model import failed: ' + error.message;
       log('Species model import failed: ' + error.message, 'error');

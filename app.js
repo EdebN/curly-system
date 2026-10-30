@@ -1262,6 +1262,7 @@
     log('Import started for ' + files.length + ' image(s).');
     await reportStorageUsage();
     const hashes = new Set(state.records.map((record) => record.sha256));
+    const importLabel = $('importLabel').value.trim();
     for (let i = 0; i < files.length; i++) {
       const item = files[i], file = item.file, relativePath = item.relativePath || file.name;
       try {
@@ -1273,6 +1274,7 @@
           const parts = relativePath.split('/').filter(Boolean);
           if (parts.length > 1) label = parts[parts.length - 2] || label;
         }
+        if (importLabel) label = importLabel;
         const record = {
           id: newId(), filename: file.name, sourceName: file.name,
           relativePath, speciesLabel: label, split: 'unassigned', sha256: hash,
@@ -1342,6 +1344,7 @@
     if (!state.objectURLs.has(record.id)) state.objectURLs.set(record.id, URL.createObjectURL(record.blob));
     return state.objectURLs.get(record.id);
   }
+  const selectedRecords = new Set();
   function renderLibrary() {
     const search = $('librarySearch').value.trim().toLowerCase();
     const split = $('splitFilter').value;
@@ -1357,14 +1360,20 @@
     $('boxTotal').textContent = String(state.records.filter((record) => record.box).length);
     $('exportCsv').disabled = !state.records.length;
     $('clearLibrary').disabled = !state.records.length;
+    selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
     const root = $('imageGrid'); root.replaceChildren();
+    updateBulkSelection(filtered);
     if (!filtered.length) {
       const empty = document.createElement('div'); empty.className = 'empty-state'; empty.style.gridColumn = '1 / -1';
       empty.textContent = state.records.length ? 'No images match these filters.' : 'Import images to begin building your dataset.';
       root.append(empty); return;
     }
     filtered.forEach((record) => {
-      const card = document.createElement('article'); card.className = 'image-card';
+      const card = document.createElement('article'); card.className = 'image-card' + (selectedRecords.has(record.id) ? ' selected' : '');
+      const selectLabel = document.createElement('label'); selectLabel.className = 'image-select';
+      const selectBox = document.createElement('input'); selectBox.type = 'checkbox'; selectBox.checked = selectedRecords.has(record.id); selectBox.setAttribute('aria-label', 'Select ' + record.filename);
+      selectBox.addEventListener('change', () => { if (selectBox.checked) selectedRecords.add(record.id); else selectedRecords.delete(record.id); updateBulkSelection(filtered); card.classList.toggle('selected', selectBox.checked); });
+      selectLabel.append(selectBox, document.createTextNode('Select'));
       const img = document.createElement('img'); img.src = imageURL(record); img.alt = record.speciesLabel + ' dataset image'; img.loading = 'lazy';
       const body = document.createElement('div'); body.className = 'image-card-body';
       const label = document.createElement('strong'); label.textContent = record.speciesLabel;
@@ -1372,9 +1381,37 @@
       const foot = document.createElement('div'); foot.className = 'image-card-foot';
       const badge = document.createElement('span'); badge.className = 'split-badge'; badge.textContent = record.split;
       const edit = document.createElement('button'); edit.className = 'edit-button'; edit.textContent = 'Edit'; edit.addEventListener('click', () => editRecord(record.id));
-      foot.append(badge, edit); body.append(label, filename, foot); card.append(img, body); root.append(card);
+      foot.append(badge, edit); body.append(label, filename, foot); card.append(selectLabel, img, body); root.append(card);
     });
   }
+  function updateBulkSelection(filtered) {
+    const visibleIds = filtered.map((record) => record.id);
+    const selectedVisible = visibleIds.filter((id) => selectedRecords.has(id)).length;
+    $('bulkSelectionCount').textContent = selectedRecords.size + ' selected';
+    $('selectVisible').textContent = visibleIds.length && selectedVisible === visibleIds.length ? 'Deselect visible' : 'Select visible';
+    $('applyBulkLabel').disabled = selectedRecords.size === 0 || !$('bulkLabel').value.trim();
+    $('clearSelection').disabled = selectedRecords.size === 0;
+  }
+  $('selectVisible').addEventListener('click', () => {
+    const search = $('librarySearch').value.trim().toLowerCase(), split = $('splitFilter').value;
+    const visible = state.records.filter((record) => (record.filename + ' ' + record.speciesLabel).toLowerCase().includes(search) && (split === 'all' || record.split === split));
+    const allSelected = visible.length && visible.every((record) => selectedRecords.has(record.id));
+    visible.forEach((record) => allSelected ? selectedRecords.delete(record.id) : selectedRecords.add(record.id));
+    renderLibrary();
+  });
+  $('clearSelection').addEventListener('click', () => { selectedRecords.clear(); renderLibrary(); });
+  $('bulkLabel').addEventListener('input', () => updateBulkSelection(state.records));
+  $('applyBulkLabel').addEventListener('click', async () => {
+    const label = $('bulkLabel').value.trim();
+    if (!label || !selectedRecords.size) return;
+    const records = state.records.filter((record) => selectedRecords.has(record.id));
+    try {
+      for (const record of records) { record.speciesLabel = label; await dbRequest('readwrite', (store) => store.put(record)); }
+      log('Bulk relabelled ' + records.length + ' image(s) as "' + label + '".');
+      $('importStatus').textContent = 'Updated ' + records.length + ' image labels.';
+      selectedRecords.clear(); renderLibrary();
+    } catch (error) { log('Bulk label update stopped: ' + error.message, 'error'); $('importStatus').textContent = 'Bulk update failed: ' + error.message; }
+  });
   $('librarySearch').addEventListener('input', renderLibrary);
   $('splitFilter').addEventListener('change', renderLibrary);
 

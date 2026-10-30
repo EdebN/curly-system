@@ -1418,6 +1418,7 @@
   $('cancelSelectionButton').addEventListener('click', () => {
     selectedRecords.clear(); selectionMode = false; renderLibrary();
   });
+  document.querySelectorAll('[data-close-bulk-dialog]').forEach((button) => button.addEventListener('click', () => $('bulkLabelDialog').close()));
   $('bulkChangeLabelButton').addEventListener('click', () => {
     if (!selectedRecords.size) return;
     $('bulkLabelInput').value = '';

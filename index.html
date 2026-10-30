@@ -167,12 +167,18 @@
           <option value="all">All splits</option><option value="unassigned">Unassigned</option><option value="train">Train</option><option value="validation">Validation</option><option value="test">Test</option>
         </select>
       </div>
-      <div class="bulk-toolbar">
-        <div><strong id="bulkSelectionCount">0 selected</strong><span class="helper">Select images, then apply one label to all of them.</span></div>
-        <button id="selectVisible" class="button secondary tiny">Select visible</button>
-        <button id="clearSelection" class="button secondary tiny" disabled>Clear selection</button>
-        <input id="bulkLabel" class="text-input" maxlength="120" placeholder="New label for selected images">
-        <button id="applyBulkLabel" class="button primary tiny" disabled>Apply label</button>
+      <div class="library-toolbar">
+        <input id="librarySearch" class="search-input" type="search" placeholder="Search filename or species label">
+        <select id="splitFilter" class="select-input" aria-label="Filter by dataset split">
+          <option value="all">All splits</option><option value="unassigned">Unassigned</option><option value="train">Train</option><option value="validation">Validation</option><option value="test">Test</option>
+        </select>
+        <button id="selectModeButton" class="button secondary select-mode-button">Select</button>
+      </div>
+      <div id="selectionBar" class="selection-bar hidden">
+        <strong id="selectionCount">0 selected</strong>
+        <button id="selectAllButton" class="button secondary tiny">Select all</button>
+        <button id="bulkChangeLabelButton" class="button primary tiny" disabled>Change label</button>
+        <button id="cancelSelectionButton" class="button secondary tiny">Cancel</button>
       </div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
     </section>
@@ -214,5 +220,14 @@
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.1/dist/mobilenet.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
   <script src="./app.js" defer></script>
+  <dialog id="bulkLabelDialog" class="edit-dialog">
+    <form id="bulkLabelForm">
+      <div class="dialog-heading"><div><p class="eyebrow">BULK EDIT</p><h2>Change image label</h2></div><button class="icon-button" type="button" aria-label="Close" onclick="document.getElementById('bulkLabelDialog').close()">×</button></div>
+      <p class="muted small">This label will be applied to every selected image.</p>
+      <label class="form-label" for="bulkLabelInput">New species label</label>
+      <input id="bulkLabelInput" class="text-input" maxlength="120" required placeholder="e.g. Australian magpie">
+      <div class="dialog-actions"><button class="button secondary" type="button" onclick="document.getElementById('bulkLabelDialog').close()">Cancel</button><button id="saveBulkLabelButton" class="button primary" type="submit">Save label</button></div>
+    </form>
+  </dialog>
 </body>
 </html>

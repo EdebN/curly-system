@@ -457,12 +457,11 @@
   }
 
   async function extractFeatures(source) {
-    const tensor = state.featureModel.infer(source, true);
+    // tidy() disposes intermediate TensorFlow.js tensors created by infer().
+    const tensor = window.tf.tidy(() => state.featureModel.infer(source, true));
     try {
       const values = await tensor.data();
       const shape = tensor.shape;
-      // Pool spatial activations into a compact feature vector so larger libraries
-      // do not consume hundreds of megabytes on an iPad.
       if (shape.length === 4 && shape[0] === 1) {
         const height = shape[1], width = shape[2], channels = shape[3];
         const pooled = new Array(channels).fill(0);
@@ -493,35 +492,59 @@
       return;
     }
     $('trainSpecies').disabled = true;
-    $('importStatus').textContent = 'Learning visual examples from ' + labelled.length + ' labelled photo(s)…';
-    state.trainingSamples = [];
+    const fingerprint = labelled.map((record) => String(record.id) + ':' + record.speciesLabel.trim()).join('|');
+    $('importStatus').textContent = 'Preparing resumable learning for ' + labelled.length + ' labelled photos…';
     let failed = 0;
     try {
-      for (let i = 0; i < labelled.length; i++) {
+      const saved = await trainingStoreRequest('readonly', store => store.get('speciesMatcher'));
+      const checkpoint = saved && saved.fingerprint === fingerprint ? saved : null;
+      state.trainingSamples = checkpoint && Array.isArray(checkpoint.samples) ? checkpoint.samples : [];
+      let startAt = checkpoint ? Math.min(checkpoint.nextIndex || 0, labelled.length) : 0;
+      if (!checkpoint) {
+        await trainingStoreRequest('readwrite', store => store.delete('speciesMatcher'));
+        log('Starting a new training pass. Previous checkpoint did not match the current labelled dataset.');
+      } else if (startAt > 0) {
+        log('Resuming training at image ' + (startAt + 1) + ' of ' + labelled.length + ' using saved progress.');
+      }
+      for (let i = startAt; i < labelled.length; i++) {
         const record = labelled[i];
+        let bitmap = null;
         try {
-          const image = new Image();
-          image.src = imageURL(record);
-          await new Promise((resolve, reject) => {
-            if (image.complete && image.naturalWidth) return resolve();
-            image.onload = resolve; image.onerror = () => reject(new Error('Image could not be decoded'));
-          });
-          const features = await extractFeatures(image);
+          bitmap = await createImageBitmap(record.blob);
+          const features = await extractFeatures(bitmap);
           state.trainingSamples.push({ label: record.speciesLabel.trim(), features, recordId: record.id });
         } catch (error) {
           failed++;
           log('Skipped training image ' + record.filename + ': ' + error.message, 'warn');
+        } finally {
+          if (bitmap && bitmap.close) bitmap.close();
+          bitmap = null;
         }
-        $('importStatus').textContent = 'Learning ' + (i + 1) + ' / ' + labelled.length + ' · ' + state.trainingSamples.length + ' usable';
-        if (i % 4 === 0) await new Promise((resolve) => setTimeout(resolve, 0));
+        const completed = i + 1;
+        $('importStatus').textContent = 'Learning ' + completed + ' / ' + labelled.length + ' · ' + state.trainingSamples.length + ' usable · checkpoint saved every 10';
+        if (completed % 10 === 0 || completed === labelled.length) {
+          await trainingStoreRequest('readwrite', store => store.put({
+            key: 'speciesMatcher', fingerprint, nextIndex: completed,
+            samples: state.trainingSamples, failed
+          }));
+          if (window.tf && window.tf.memory) {
+            const memory = window.tf.memory();
+            log('Training checkpoint ' + completed + '/' + labelled.length + ' · TensorFlow tensors: ' + memory.numTensors + ', estimated GPU/CPU memory: ' + Math.round(memory.numBytes / 1048576) + ' MB.');
+          }
+        }
+        // Yield after every image so Safari can paint progress and reclaim decoded image memory.
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
       state.trainingReady = state.trainingSamples.length > 0;
-      const labels = new Set(state.trainingSamples.map((sample) => sample.label));
+      const labels = new Set(state.trainingSamples.map(sample => sample.label));
       $('classifierCapability').textContent = state.trainingReady ? labels.size + ' species learned' : 'Not trained';
       $('classifierCapability').className = state.trainingReady ? 'good' : 'warn';
-      $('importStatus').textContent = 'Learned ' + state.trainingSamples.length + ' image example(s) across ' + labels.size + ' species · ' + failed + ' skipped. This is example-based matching, not full model-weight training.';
+      $('importStatus').textContent = 'Learned ' + state.trainingSamples.length + ' image example(s) across ' + labels.size + ' species · ' + failed + ' skipped. Progress is saved locally.';
       $('trainSpecies').textContent = 'Relearn from photos';
       log('Species matcher ready: ' + state.trainingSamples.length + ' examples, ' + labels.size + ' species, ' + failed + ' images skipped.');
+    } catch (error) {
+      $('importStatus').textContent = 'Learning paused at ' + state.trainingSamples.length + ' examples. Progress was checkpointed where possible. Press Learn again to resume. Error: ' + error.message;
+      log('Training paused: ' + error.message, 'error');
     } finally {
       $('trainSpecies').disabled = false;
     }
@@ -1177,13 +1200,14 @@
   function openDatabase() {
     return new Promise((resolve, reject) => {
       if (!('indexedDB' in window)) { reject(new Error('IndexedDB is unavailable in this browser.')); return; }
-      const request = indexedDB.open('WildlifeVisionDB', 1);
+      const request = indexedDB.open('WildlifeVisionDB', 2);
       request.onupgradeneeded = () => {
         const db = request.result;
         if (!db.objectStoreNames.contains('images')) {
           const store = db.createObjectStore('images', { keyPath: 'id' });
           store.createIndex('hash', 'sha256', { unique: true });
         }
+        if (!db.objectStoreNames.contains('training')) db.createObjectStore('training', { keyPath: 'key' });
       };
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error || new Error('Could not open local database.'));
@@ -1212,6 +1236,23 @@
       };
       tx.onerror = () => fail(tx.error || (req && req.error) || new Error('Database transaction failed.'));
       tx.onabort = () => fail(tx.error || (req && req.error) || new Error('Database transaction was aborted.'));
+    });
+  }
+
+  function trainingStoreRequest(mode, action) {
+    return new Promise((resolve, reject) => {
+      let tx, req, result;
+      try {
+        tx = state.db.transaction('training', mode);
+        req = action(tx.objectStore('training'));
+      } catch (error) { reject(error); return; }
+      if (req) {
+        req.onsuccess = () => { result = req.result; };
+        req.onerror = () => reject(req.error || new Error('Training checkpoint request failed.'));
+      }
+      tx.oncomplete = () => resolve(req ? result : true);
+      tx.onerror = () => reject(tx.error || new Error('Training checkpoint transaction failed.'));
+      tx.onabort = () => reject(tx.error || new Error('Training checkpoint transaction was aborted.'));
     });
   }
 

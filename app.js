@@ -1361,12 +1361,38 @@
     $('selectModeButton').classList.toggle('active', selectionMode);
     $('selectAllButton').textContent = visibleLibraryRecords().every((record) => selectedRecords.has(record.id)) ? 'Deselect all' : 'Select all';
     $('bulkChangeLabelButton').disabled = selectedRecords.size === 0;
+    $('bulkChangeLabelButton').textContent = 'Rename';
   }
-  function toggleRecordSelection(id) {
-    if (selectedRecords.has(id)) selectedRecords.delete(id);
-    else selectedRecords.add(id);
-    renderLibrary();
+  let pointerSelecting = false;
+  let pointerSelectionValue = true;
+  let lastPointerCard = null;
+  function setRecordSelected(id, selected) {
+    if (selected) selectedRecords.add(id); else selectedRecords.delete(id);
+    const card = $('imageGrid').querySelector('[data-record-id="' + CSS.escape(String(id)) + '"]');
+    if (card) card.classList.toggle('selected', selected);
+    updateSelectionBar();
   }
+  const imageGrid = $('imageGrid');
+  imageGrid.addEventListener('pointerdown', (event) => {
+    if (!selectionMode) return;
+    const card = event.target.closest('.image-card');
+    if (!card) return;
+    event.preventDefault();
+    pointerSelecting = true;
+    pointerSelectionValue = !selectedRecords.has(card.dataset.recordId);
+    lastPointerCard = card.dataset.recordId;
+    setRecordSelected(card.dataset.recordId, pointerSelectionValue);
+  });
+  imageGrid.addEventListener('pointerover', (event) => {
+    if (!selectionMode || !pointerSelecting) return;
+    const card = event.target.closest('.image-card');
+    if (!card || card.dataset.recordId === lastPointerCard) return;
+    lastPointerCard = card.dataset.recordId;
+    setRecordSelected(card.dataset.recordId, pointerSelectionValue);
+  });
+  const stopPointerSelection = () => { pointerSelecting = false; lastPointerCard = null; };
+  document.addEventListener('pointerup', stopPointerSelection);
+  document.addEventListener('pointercancel', stopPointerSelection);
   function renderLibrary() {
     const filtered = visibleLibraryRecords();
     const species = new Set(state.records.map((record) => record.speciesLabel));
@@ -1387,6 +1413,7 @@
     filtered.forEach((record) => {
       const card = document.createElement('article');
       card.className = 'image-card' + (selectedRecords.has(record.id) ? ' selected' : '') + (selectionMode ? ' selection-mode' : '');
+      card.dataset.recordId = String(record.id);
       const img = document.createElement('img'); img.src = imageURL(record); img.alt = record.speciesLabel + ' dataset image'; img.loading = 'lazy';
       const tick = document.createElement('span'); tick.className = 'selection-tick'; tick.textContent = '✓'; tick.setAttribute('aria-hidden', 'true');
       const body = document.createElement('div'); body.className = 'image-card-body';
@@ -1397,9 +1424,6 @@
       const edit = document.createElement('button'); edit.className = 'edit-button'; edit.textContent = 'Edit';
       edit.addEventListener('click', (event) => { event.stopPropagation(); if (!selectionMode) editRecord(record.id); else toggleRecordSelection(record.id); });
       foot.append(badge, edit); body.append(label, filename, foot); card.append(img, tick, body);
-      card.addEventListener('click', (event) => {
-        if (selectionMode) { event.preventDefault(); toggleRecordSelection(record.id); }
-      });
       root.append(card);
     });
     updateSelectionBar();
@@ -1438,9 +1462,9 @@
         record.speciesLabel = label;
       }
       $('bulkLabelDialog').close();
-      log('Bulk relabelled ' + records.length + ' image(s) as "' + label + '".');
-      $('importStatus').textContent = 'Updated ' + records.length + ' image labels.';
-      selectedRecords.clear(); selectionMode = false; renderLibrary();
+      log('Renamed ' + records.length + ' selected image(s) to "' + label + '".');
+      $('importStatus').textContent = 'Renamed ' + records.length + ' images. Selection is still active.';
+      renderLibrary();
     } catch (error) {
       log('Bulk label update stopped: ' + error.message, 'error');
       $('importStatus').textContent = 'Bulk update failed: ' + error.message;

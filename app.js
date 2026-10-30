@@ -10,7 +10,7 @@
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
     objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
-    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, lastInferenceMs: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, rfSession: null, rfLabels: [], rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded", spatialTracks: [], nextSpatialId: 1, showSpatialGrid: true, showTrails: true, showCoordinates: true
+    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, lastInferenceMs: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, hasSavedTraining: false, rfSession: null, rfLabels: [], rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded", spatialTracks: [], nextSpatialId: 1, showSpatialGrid: true, showTrails: true, showCoordinates: true
   };
 
   const video = $('cameraVideo');
@@ -478,11 +478,20 @@
     }
   }
 
-  function exportSpeciesModel() {
-    if (!state.trainingSamples.length) {
-      $('importStatus').textContent = 'Learn from labelled photos or import a trained model first.';
-      return;
-    }
+  async function exportSpeciesModel() {
+    try {
+      if (!state.trainingSamples.length && state.db) {
+        const saved = await trainingStoreRequest('readonly', store => store.get('speciesMatcher'));
+        if (saved && Array.isArray(saved.samples) && saved.samples.length) {
+          state.trainingSamples = saved.samples;
+          state.hasSavedTraining = true;
+          state.trainingReady = true;
+        }
+      }
+      if (!state.trainingSamples.length) {
+        $('importStatus').textContent = 'No saved learning data found yet. Complete Learn from labelled photos first.';
+        return;
+      }
     const labels = [...new Set(state.trainingSamples.map(sample => sample.label))].sort();
     const payload = {
       format: 'wildlifevision-species-matcher',
@@ -509,6 +518,10 @@
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     $('importStatus').textContent = 'Exported ' + payload.exampleCount + ' learned examples across ' + labels.length + ' species.';
     log('Exported portable species matcher: ' + payload.exampleCount + ' examples across ' + labels.length + ' species.');
+    } catch (error) {
+      $('importStatus').textContent = 'Model export failed: ' + error.message;
+      log('Species model export failed: ' + error.message, 'error');
+    }
   }
 
   async function trainSpeciesMatcher() {
@@ -569,6 +582,7 @@
         await new Promise(resolve => setTimeout(resolve, 0));
       }
       state.trainingReady = state.trainingSamples.length > 0;
+      state.hasSavedTraining = state.trainingReady;
       const labels = new Set(state.trainingSamples.map(sample => sample.label));
       $('classifierCapability').textContent = state.trainingReady ? labels.size + ' species learned' : 'Not trained';
       $('classifierCapability').className = state.trainingReady ? 'good' : 'warn';
@@ -1171,6 +1185,7 @@
         label: sample.label.trim(), features: sample.features, recordId: sample.recordId ?? null
       }));
       state.trainingReady = true;
+      state.hasSavedTraining = true;
       const labels = new Set(state.trainingSamples.map(sample => sample.label));
       $('classifierCapability').textContent = labels.size + ' species learned';
       $('classifierCapability').className = 'good';
@@ -1513,7 +1528,7 @@
     $('speciesTotal').textContent = String(species.size);
     $('boxTotal').textContent = String(state.records.filter((record) => record.box).length);
     $('exportCsv').disabled = !state.records.length;
-    $('exportModel').disabled = !state.trainingSamples.length;
+    $('exportModel').disabled = !(state.trainingSamples.length || state.hasSavedTraining);
     $('clearLibrary').disabled = !state.records.length;
     selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
     const root = $('imageGrid'); root.replaceChildren();
@@ -1664,6 +1679,10 @@
     try {
       state.db = await openDatabase();
       await loadRecords();
+      const savedTraining = await trainingStoreRequest('readonly', store => store.get('speciesMatcher'));
+      state.hasSavedTraining = !!(savedTraining && Array.isArray(savedTraining.samples) && savedTraining.samples.length);
+      $('exportModel').disabled = !state.hasSavedTraining;
+      if (state.hasSavedTraining) log('Saved learned model found locally: ' + savedTraining.samples.length + ' examples. Ready to export.');
       $('storageLabel').textContent = 'Ready';
       setCameraCapability('Not started', 'neutral');
       log('Local database ready.');

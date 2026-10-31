@@ -139,7 +139,7 @@
     <section id="libraryPanel" class="panel">
       <div class="section-heading">
         <div><p class="eyebrow">LOCAL DATASET</p><h2>Bird image library</h2><p class="muted">Images and labels are stored in this browser on this device using IndexedDB.</p></div>
-        <div class="library-heading-actions"><button id="trainSpecies" class="button primary">Learn from labelled photos</button><button id="exportModel" class="button secondary" disabled>Export trained model</button><label class="button secondary file-button">Import trained model<input id="modelPicker" type="file" accept=".wvmodel,.json,application/json"></label><button id="exportCsv" class="button secondary" disabled>Export CSV</button><button id="exportYolo" class="button secondary" disabled>Export YOLO dataset</button><button id="trainYoloColab" class="button primary" disabled>Train YOLO11 in Colab</button></div>
+        <div class="library-heading-actions"><button id="exportModel" class="button secondary" disabled>Export trained model</button><label class="button secondary file-button">Import trained model<input id="modelPicker" type="file" accept=".wvmodel,.json,application/json"></label><button id="exportCsv" class="button secondary" disabled>Export CSV</button></div>
       </div>
       <div class="library-metrics">
         <div class="metric-card"><span class="metric-label">Images</span><strong id="imageTotal">0</strong></div>
@@ -149,7 +149,7 @@
       </div>
       <div class="card import-card">
         <div class="card-heading"><div><p class="eyebrow">ADD PHOTOS</p><h3>Import dataset images</h3></div></div>
-        <p class="muted">Import one folder per species, check the labels, then tap <strong>Learn from labelled photos</strong>. The app builds a local visual-example matcher from those labels. For best results, use clear photos where the bird fills much of the frame and include several different views per species.</p>
+        <p class="muted">Import your images first. Then select images in the library and use the bulk-label control to assign their species. The bounding-box preparation and training steps follow below.</p>
         <div class="import-actions">
           <label class="button primary file-button">Import species ZIP<input id="zipPicker" type="file" accept=".zip,application/zip,application/x-zip-compressed"></label>
           <label class="button secondary file-button">Import images<input id="imagePicker" type="file" accept="image/*,.heic,.heif,.avif,.tif,.tiff,.bmp" multiple></label>
@@ -161,6 +161,8 @@
         <p class="helper">If you select several individual images, this label is applied to all of them. For folder imports, leave it blank to use each folder's name.</p>
         <p id="importStatus" class="helper" role="status">Your library is empty.</p>
       </div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 2 · SPECIES LABELS</p><h3>Label images in bulk</h3></div><button id="selectModeButton" class="button secondary select-mode-button">Select images</button></div><p class="muted">Select a group of images, choose Rename, and assign the correct species label. Repeat for each species group. Labels are applied before box generation and become the YOLO class names.</p></div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 3 · PREPARE BOX SUGGESTIONS</p><h3>Train for Bounding Boxes</h3><button id="trainSpecies" class="button primary">Train for Bounding Boxes</button></div></div><p class="muted">Builds the local visual-example matcher from your labelled photos. It helps suggest a box when the generic bird detector misses one; it does not train YOLO detector weights.</p></div>
       <div class="library-toolbar">
         <input id="librarySearch" class="search-input" type="search" placeholder="Search filename or species label">
         <select id="splitFilter" class="select-input" aria-label="Filter by dataset split">
@@ -169,8 +171,7 @@
         <select id="annotationSort" class="select-input" aria-label="Sort by detection uncertainty">
           <option value="default">Default order</option><option value="uncertain">Most uncertain first · verified last</option><option value="confident">Most confident first · verified first</option><option value="unboxed">Missing boxes first</option>
         </select>
-        <button id="autoAnnotate" class="button secondary">Auto-detect boxes</button>
-        <button id="selectModeButton" class="button secondary select-mode-button">Select</button>
+        <button id="autoAnnotate" class="button secondary">Auto-generate Bounding Boxes</button>
       </div>
       <div id="selectionBar" class="selection-bar hidden">
         <strong id="selectionCount">0 selected</strong>
@@ -179,6 +180,7 @@
         <button id="cancelSelectionButton" class="button secondary tiny">Cancel</button>
       </div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Check boxes, then save the dataset ZIP</h3></div><button id="exportYolo" class="button secondary" disabled>Save YOLO dataset ZIP</button></div><p class="muted">Open each image with Edit, correct the boxes, and mark the annotations verified. Check images containing multiple birds individually. Export only after reviewing the generated boxes.</p><div class="card-heading"><div><p class="eyebrow">STEP 6 · MODEL TRAINING</p><h3>Train in Google Colab</h3></div><button id="trainYoloColab" class="button primary" disabled>Train in Colab</button></div><p class="muted">After saving the ZIP, open the Colab notebook, select a T4 GPU runtime, upload the ZIP, and run the training cell.</p></div>
     </section>
 
     <section id="diagnosticsPanel" class="panel">

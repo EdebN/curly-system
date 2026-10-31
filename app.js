@@ -1664,7 +1664,7 @@
   async function proposeLearnedBox(image) {
     const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
     const minSide = Math.min(width, height);
-    const candidates = [{ x: 0, y: 0, width, height }];
+    const candidates = [];
     // A compact image pyramid: overlapping windows at three scales. This lets
     // the learned examples propose a location when COCO-SSD misses the bird.
     for (const fraction of [0.34, 0.50, 0.68]) {

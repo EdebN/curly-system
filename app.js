@@ -3,6 +3,34 @@
   'use strict';
 
   const $ = (id) => document.getElementById(id);
+  const YOLO_CLASS_NAMES = [
+  "Australian Ibis",
+  "Australian Raven (corvus coronoides)",
+  "Australian Ringneck",
+  "Black flying fox",
+  "Black-bellied Plover (Pluvialis squatarola)",
+  "Carnaby’s Black-Cockatoo",
+  "Fairy Martin (Petrochelidon ariel)",
+  "Greater Sand Plover (Anarhynchus leschenaultii)",
+  "Hooded Plover (Thinornis cucullatus)",
+  "House sparrow",
+  "Laughing Dove",
+  "Laughing Kookaburra (Dacelo novaguineae)",
+  "Little Red Flying Fox",
+  "Mallard",
+  "Nankeen Kestrel (Falco cenchroides)",
+  "Red capped Plover (Anarhynchus ruficapillus)",
+  "Red Collared Lorikeet",
+  "Red-tailed Black Cockatoo (Calyptorhynchus banksii)",
+  "Sacred Kingfisher",
+  "Tawny Frogmouth",
+  "Welcome Swallow (Hirundo neoxena)",
+  "Western Australian Magpie",
+  "Western Wattlebird (Anthochaera lunulata)",
+  "White wagtail",
+  "Willie Wagtail"
+];
+
   const state = {
     stream: null, track: null, cameraRunning: false, raf: 0, lastFrame: null,
     frameWidth: 0, frameHeight: 0, sensitivity: 30, minArea: 25, zoom: 1,
@@ -10,7 +38,7 @@
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
     objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
-    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, lastInferenceMs: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, hasSavedTraining: false, rfSession: null, rfLabels: [], rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded", spatialTracks: [], nextSpatialId: 1, showSpatialGrid: true, showTrails: true, showCoordinates: true
+    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, lastInferenceMs: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, hasSavedTraining: false, rfSession: null, rfLabels: YOLO_CLASS_NAMES.slice(), rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded", spatialTracks: [], nextSpatialId: 1, showSpatialGrid: true, showTrails: true, showCoordinates: true
   };
 
   const video = $('cameraVideo');
@@ -289,7 +317,7 @@
     if (!state.cameraRunning) return;
     // Pause expensive work when this tab is backgrounded.
     if (document.hidden) { state.raf = 0; return; }
-    if (state.detectionMode === "ai" || state.detectionMode === "rfdetr") {
+    if (state.detectionMode === "ai" || state.detectionMode === "yolo") {
       if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) runAIDetection();
       state.raf = requestAnimationFrame(processFrame);
       return;
@@ -320,20 +348,20 @@
   }
 
 
-  async function loadRfDetrModel() {
+  async function loadYoloOnnxModel() {
     const file = $('rfModelPicker').files && $('rfModelPicker').files[0];
-    if (!file) { $('rfStatus').textContent = 'Choose a compatible RF-DETR ONNX export first.'; return; }
+    if (!file) { $('rfStatus').textContent = 'Choose your trained YOLO11 .onnx file first.'; return; }
     if (!window.ort || !window.ort.InferenceSession) throw new Error('ONNX Runtime Web did not load. Check internet access and reload.');
     $('loadRfDetr').disabled = true;
-    $('rfStatus').textContent = 'Loading model into browser memory. Large models may exceed iPad memory limits…';
+    $('rfStatus').textContent = 'Loading YOLO model into browser memory…';
     try {
       const bytes = await file.arrayBuffer();
       let session;
       try {
         session = await window.ort.InferenceSession.create(bytes, { executionProviders: ['webgpu', 'wasm'], graphOptimizationLevel: 'all' });
-        state.rfProvider = 'WebGPU preferred';
+        state.rfProvider = 'WebGPU / WASM fallback';
       } catch (gpuError) {
-        log('RF-DETR WebGPU initialisation failed; retrying with WASM: ' + gpuError.message, 'warn');
+        log('WebGPU initialisation failed; retrying YOLO with WASM: ' + gpuError.message, 'warn');
         session = await window.ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
         state.rfProvider = 'WASM';
       }
@@ -341,74 +369,127 @@
       state.rfModelName = file.name;
       const meta = session.inputMetadata && session.inputMetadata[session.inputNames[0]];
       const dims = meta && meta.dimensions;
-      state.rfInputSize = dims && dims.length >= 4 && Number.isFinite(dims[2]) && dims[2] > 0 ? dims[2] : 560;
-      state.detectionMode = 'rfdetr';
+      state.rfInputSize = dims && dims.length >= 4 && Number.isFinite(dims[2]) && dims[2] > 0 ? dims[2] : 640;
+      state.detectionMode = 'yolo';
       $('rfMode').className = 'button primary'; $('aiMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
-      $('rfStatus').textContent = 'Loaded ' + file.name + ' · input ' + state.rfInputSize + 'px · ' + state.rfProvider + '. Test with known images before relying on results.';
-      $('detectorCapability').textContent = 'RF-DETR ready'; $('detectorCapability').className = 'good';
-      log('RF-DETR ONNX loaded: ' + file.name + '; inputs=' + session.inputNames.join(',') + '; outputs=' + session.outputNames.join(',') + '.');
+      $('rfStatus').textContent = 'Loaded ' + file.name + ' · ' + state.rfInputSize + 'px input · ' + state.rfProvider + '. Default labels: ' + state.rfLabels.length + ' classes.';
+      $('detectorCapability').textContent = 'YOLO11 ready'; $('detectorCapability').className = 'good';
+      $('modelReadout').textContent = 'YOLO11';
+      log('YOLO ONNX loaded: ' + file.name + '; inputs=' + session.inputNames.join(',') + '; outputs=' + session.outputNames.join(',') + '.');
+      $('aiStatus').textContent = 'YOLO11 detector ready. Start the camera or use a known test image.';
     } catch (error) {
-      state.rfSession = null; $('rfStatus').textContent = 'RF-DETR load failed: ' + error.message;
-      log('RF-DETR load failed: ' + error.message, 'error'); throw error;
+      state.rfSession = null; $('rfStatus').textContent = 'YOLO model load failed: ' + error.message;
+      log('YOLO ONNX load failed: ' + error.message, 'error'); throw error;
     } finally { $('loadRfDetr').disabled = false; }
   }
 
-  async function runRfDetrDetection() {
+  function yoloIoU(a, b) {
+    const left = Math.max(a[0], b[0]), top = Math.max(a[1], b[1]);
+    const right = Math.min(a[0] + a[2], b[0] + b[2]);
+    const bottom = Math.min(a[1] + a[3], b[1] + b[3]);
+    const intersection = Math.max(0, right - left) * Math.max(0, bottom - top);
+    const union = a[2] * a[3] + b[2] * b[3] - intersection;
+    return union > 0 ? intersection / union : 0;
+  }
+
+  function suppressYoloDuplicates(items, iouThreshold = 0.45, limit = 100) {
+    const sorted = items.slice().sort((a, b) => b.prediction.score - a.prediction.score);
+    const kept = [];
+    for (const candidate of sorted) {
+      const box = candidate.prediction.bbox;
+      const label = candidate.prediction.class;
+      if (kept.some((chosen) => chosen.prediction.class === label &&
+        yoloIoU(box, chosen.prediction.bbox) > iouThreshold)) continue;
+      kept.push(candidate);
+      if (kept.length >= limit) break;
+    }
+    return kept;
+  }
+
+  async function runYoloDetection() {
     if (!state.rfSession || state.rfBusy || !video.videoWidth || !video.videoHeight) return;
     state.rfBusy = true;
+    const inferenceStarted = performance.now();
     try {
-      const side = state.rfInputSize || 560;
-      const inputCanvas = document.createElement('canvas'); inputCanvas.width = side; inputCanvas.height = side;
+      const side = state.rfInputSize || 640;
+      const inputCanvas = document.createElement('canvas');
+      inputCanvas.width = side; inputCanvas.height = side;
       const inputCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
-      inputCtx.fillStyle = '#fff'; inputCtx.fillRect(0, 0, side, side);
+      // Ultralytics detection exports use RGB pixels scaled to [0, 1], not ImageNet normalisation.
+      inputCtx.fillStyle = 'rgb(114,114,114)';
+      inputCtx.fillRect(0, 0, side, side);
       const scale = Math.min(side / video.videoWidth, side / video.videoHeight);
       const drawW = Math.round(video.videoWidth * scale), drawH = Math.round(video.videoHeight * scale);
       const offX = Math.floor((side - drawW) / 2), offY = Math.floor((side - drawH) / 2);
       inputCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, offX, offY, drawW, drawH);
       const pixels = inputCtx.getImageData(0, 0, side, side).data, plane = side * side;
-      const input = new Float32Array(plane * 3), mean = [0.485, 0.456, 0.406], std = [0.229, 0.224, 0.225];
+      const input = new Float32Array(plane * 3);
       for (let p = 0; p < plane; p++) {
-        input[p] = (pixels[p * 4] / 255 - mean[0]) / std[0];
-        input[plane + p] = (pixels[p * 4 + 1] / 255 - mean[1]) / std[1];
-        input[plane * 2 + p] = (pixels[p * 4 + 2] / 255 - mean[2]) / std[2];
+        input[p] = pixels[p * 4] / 255;
+        input[plane + p] = pixels[p * 4 + 1] / 255;
+        input[plane * 2 + p] = pixels[p * 4 + 2] / 255;
       }
-      const result = await state.rfSession.run({ [state.rfSession.inputNames[0]]: new window.ort.Tensor('float32', input, [1, 3, side, side]) });
-      const outputs = state.rfSession.outputNames.map((name) => ({ name, tensor: result[name] }));
-      const boxOutput = outputs.find((o) => { const d = o.tensor.dims || []; return d.length >= 2 && d[d.length - 1] === 4; });
-      const scoreOutput = outputs.find((o) => o !== boxOutput && (o.tensor.dims || []).length >= 2);
-      if (!boxOutput || !scoreOutput) throw new Error('Could not identify boxes and scores in the ONNX outputs. This export needs a model-specific adapter.');
-      const boxes = boxOutput.tensor.data, scores = scoreOutput.tensor.data;
-      const boxDims = boxOutput.tensor.dims, scoreDims = scoreOutput.tensor.dims;
-      const count = boxDims[boxDims.length - 2], classes = scoreDims[scoreDims.length - 1], detections = [];
-      for (let i = 0; i < count; i++) {
-        let bestScore = -Infinity, bestClass = 0;
-        for (let c = 0; c < classes; c++) {
-          const raw = scores[i * classes + c], score = raw >= 0 && raw <= 1 ? raw : 1 / (1 + Math.exp(-raw));
-          if (score > bestScore) { bestScore = score; bestClass = c; }
+      const result = await state.rfSession.run({
+        [state.rfSession.inputNames[0]]: new window.ort.Tensor('float32', input, [1, 3, side, side])
+      });
+      const outputName = state.rfSession.outputNames[0];
+      const output = result[outputName];
+      const dims = output && output.dims ? output.dims : [];
+      if (dims.length !== 3 || dims[0] !== 1) {
+        throw new Error('Expected a raw YOLO output shaped [1, 4 + classes, boxes] or [1, boxes, 4 + classes]. Export with nms=False.');
+      }
+      // Standard Ultralytics YOLO11 ONNX output is [1, 4 + classes, anchors].
+      const channelsFirst = dims[1] < dims[2];
+      const channelCount = channelsFirst ? dims[1] : dims[2];
+      const boxCount = channelsFirst ? dims[2] : dims[1];
+      const classCount = channelCount - 4;
+      if (classCount < 1) throw new Error('YOLO output has no class-score channels.');
+      const values = output.data;
+      const at = (anchor, channel) => channelsFirst
+        ? values[channel * boxCount + anchor]
+        : values[anchor * channelCount + channel];
+      if (state.rfLabels.length !== classCount) {
+        log('YOLO output has ' + classCount + ' classes but ' + state.rfLabels.length + ' labels are loaded. Missing names will use class indices.', 'warn');
+      }
+      const candidates = [];
+      for (let i = 0; i < boxCount; i++) {
+        let score = -Infinity, classId = 0;
+        for (let c = 0; c < classCount; c++) {
+          const raw = at(i, c + 4);
+          const confidence = raw >= 0 && raw <= 1 ? raw : 1 / (1 + Math.exp(-raw));
+          if (confidence > score) { score = confidence; classId = c; }
         }
-        if (bestScore < state.aiThreshold) continue;
-        let bx = boxes[i * 4], by = boxes[i * 4 + 1], bw = boxes[i * 4 + 2], bh = boxes[i * 4 + 3];
-        if (Math.max(Math.abs(bx), Math.abs(by), Math.abs(bw), Math.abs(bh)) <= 2) {
-          bx = (bx - bw / 2) * side; by = (by - bh / 2) * side; bw *= side; bh *= side;
-        } else { bx -= bw / 2; by -= bh / 2; }
-        const x = Math.max(0, (bx - offX) / scale), y = Math.max(0, (by - offY) / scale);
-        const w = Math.min(video.videoWidth - x, bw / scale), h = Math.min(video.videoHeight - y, bh / scale);
-        if (!(w > 2 && h > 2)) continue;
-        if (isMasked((x + w / 2) / video.videoWidth, (y + h / 2) / video.videoHeight)) continue;
-        const label = state.rfLabels[bestClass] || ('class_' + bestClass);
-        detections.push({ prediction: { bbox: [x, y, w, h], score: bestScore, class: label }, match: { label, similarity: 0 } });
+        if (score < state.aiThreshold) continue;
+        let cx = at(i, 0), cy = at(i, 1), width = at(i, 2), height = at(i, 3);
+        if (Math.max(Math.abs(cx), Math.abs(cy), Math.abs(width), Math.abs(height)) <= 2) {
+          cx *= side; cy *= side; width *= side; height *= side;
+        }
+        const left = Math.max(0, Math.min(video.videoWidth, (cx - width / 2 - offX) / scale));
+        const top = Math.max(0, Math.min(video.videoHeight, (cy - height / 2 - offY) / scale));
+        const right = Math.max(0, Math.min(video.videoWidth, (cx + width / 2 - offX) / scale));
+        const bottom = Math.max(0, Math.min(video.videoHeight, (cy + height / 2 - offY) / scale));
+        const w = right - left, h = bottom - top;
+        if (w < 2 || h < 2 || isMasked((left + w / 2) / video.videoWidth, (top + h / 2) / video.videoHeight)) continue;
+        const label = state.rfLabels[classId] || ('class_' + classId);
+        candidates.push({
+          prediction: { bbox: [left, top, w, h], score, class: label, customDetector: true },
+          match: { label, similarity: 0 }
+        });
       }
-      detections.sort((a, b) => b.prediction.score - a.prediction.score);
-      updateSpatialTracks(detections.slice(0, 30));
-      state.aiDetections = filterRelevantDetections(detections.slice(0, 30));
+      const detections = suppressYoloDuplicates(candidates);
+      updateSpatialTracks(detections);
+      state.aiDetections = filterRelevantDetections(detections);
       drawAIDetections();
       $('birdCount').textContent = String(state.aiDetections.length);
-      $('speciesMatchCount').textContent = String(state.aiDetections.filter(isPriorityLearnedDetection).length);
+      $('speciesMatchCount').textContent = '—';
+      $('detectionReadout').textContent = 'OBJECTS ' + state.aiDetections.length;
       renderTracks();
-      $('aiStatus').textContent = 'RF-DETR inference completed. Verify the export’s input normalisation, box format and score format if detections look wrong.';
+      $('aiStatus').textContent = detections.length
+        ? state.aiDetections.length + ' YOLO detection(s) · ' + classCount + ' classes · ' + Math.round(performance.now() - inferenceStarted) + ' ms. Confidence is a model score, not certainty.'
+        : 'No detections passed the confidence threshold. Lower the confidence slider to inspect weaker candidates.';
     } catch (error) {
-      $('rfStatus').textContent = 'RF-DETR inference error: ' + error.message;
-      log('RF-DETR inference failed: ' + error.message, 'error');
+      $('rfStatus').textContent = 'YOLO inference error: ' + error.message;
+      log('YOLO inference failed: ' + error.message, 'error');
     } finally { state.rfBusy = false; }
   }
 
@@ -659,10 +740,10 @@
   }
 
   async function runAIDetection() {
-    if (state.detectionMode === 'rfdetr') {
+    if (state.detectionMode === 'yolo') {
       if (state.rfBusy) return;
       const rfStarted = performance.now();
-      await runRfDetrDetection();
+      await runYoloDetection();
       state.lastInferenceMs = performance.now() - rfStarted;
       updatePerformanceReadout();
       return;
@@ -749,8 +830,8 @@
     $('cameraResolution').textContent = video.videoWidth && video.videoHeight ? video.videoWidth + ' × ' + video.videoHeight : 'NO SIGNAL';
     $('detectionTotal').textContent = String(state.aiDetections.length);
     $('detectionReadout').textContent = 'OBJECTS ' + state.aiDetections.length;
-    $('modelReadout').textContent = state.detectionMode === 'rfdetr'
-      ? (state.rfSession ? 'RF-DETR' : 'RF-DETR OFFLINE')
+    $('modelReadout').textContent = state.detectionMode === 'yolo'
+      ? (state.rfSession ? 'YOLO11' : 'YOLO11 OFFLINE')
       : (state.detectorModel ? 'COCO-SSD' : 'MODEL OFFLINE');
   }
 
@@ -811,13 +892,13 @@
       // Human detections must not depend on movement: a stationary person is still a person.
       const human = String(item && item.prediction && item.prediction.class || '').toLowerCase() === 'person' ||
         String(track && track.label || '').toLowerCase() === 'person';
-      if (track) track.visible = priority || human || (track.motionEvidence || 0) >= 4;
-      return priority || human || Boolean(track && track.visible);
+      if (track) track.visible = priority || human || Boolean(item && item.prediction && item.prediction.customDetector) || (track.motionEvidence || 0) >= 4;
+      return priority || human || Boolean(item && item.prediction && item.prediction.customDetector) || Boolean(track && track.visible);
     });
     const active = state.spatialTracks.filter((track) => track.missed === 0 && track.visible);
     $('spatialCount').textContent = String(active.length);
     $('sceneSummary').textContent = active.length
-      ? active.map((track) => track.label + ' · ' + relativePosition(track.cx, track.cy) + (isPriorityLearnedDetection(track.item) ? ' · learned target' : ' · moving')).slice(0, 3).join(' | ')
+      ? active.map((track) => track.label + ' · ' + relativePosition(track.cx, track.cy) + (track.item && track.item.prediction && track.item.prediction.customDetector ? ' · YOLO detection' : isPriorityLearnedDetection(track.item) ? ' · learned target' : ' · moving')).slice(0, 3).join(' | ')
       : 'No moving objects or learned targets in view';
     return relevant;
   }
@@ -1102,10 +1183,10 @@
   function renderTracks() {
     const root = $('tracksList');
     root.replaceChildren();
-    if (state.detectionMode === 'ai' || state.detectionMode === 'rfdetr') {
+    if (state.detectionMode === 'ai' || state.detectionMode === 'yolo') {
       if (!state.aiDetections.length) {
         root.className = 'empty-state';
-        root.textContent = state.cameraRunning ? 'Waiting for moving objects or learned species targets. Stationary generic objects are hidden.' : 'Load the AI models and start the camera to detect relevant wildlife.';
+        root.textContent = state.cameraRunning ? (state.detectionMode === 'yolo' ? 'Waiting for YOLO detections. Lower the confidence threshold to inspect weaker candidates.' : 'Waiting for moving objects or learned species targets. Stationary generic objects are hidden.') : 'Load a detector and start the camera to detect wildlife.';
         return;
       }
       root.className = 'track-list';
@@ -1155,7 +1236,7 @@
     if (event.target === $('observationDialog')) $('observationDialog').close();
   });
   $('loadAI').addEventListener('click', () => loadAIModels().catch((error) => log('AI load error: ' + error.message, 'error')));
-  $('loadRfDetr').addEventListener('click', () => loadRfDetrModel().catch((error) => log('RF-DETR load error: ' + error.message, 'error')));
+  $('loadRfDetr').addEventListener('click', () => loadYoloOnnxModel().catch((error) => log('YOLO11 load error: ' + error.message, 'error')));
   $('rfLabelsPicker').addEventListener('change', async (event) => {
     const file = event.target.files && event.target.files[0]; if (!file) return;
     try {
@@ -1163,13 +1244,13 @@
       state.rfLabels = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.names) ? parsed.names : Object.values(parsed));
       $('rfLabelsName').textContent = file.name + ' · ' + state.rfLabels.length + ' labels';
       $('rfStatus').textContent = 'Loaded ' + state.rfLabels.length + ' class labels from ' + file.name + '.';
-      log('Loaded RF-DETR labels: ' + state.rfLabels.length + '.');
-    } catch (error) { $('rfStatus').textContent = 'Labels JSON invalid: ' + error.message; log('RF-DETR labels parse failed: ' + error.message, 'error'); }
+      log('Loaded YOLO11 labels: ' + state.rfLabels.length + '.');
+    } catch (error) { $('rfStatus').textContent = 'Labels JSON invalid: ' + error.message; log('YOLO11 labels parse failed: ' + error.message, 'error'); }
   });
   $('rfMode').addEventListener('click', () => {
-    if (!state.rfSession) { $('rfStatus').textContent = 'Load a compatible RF-DETR ONNX model first.'; return; }
-    state.detectionMode = 'rfdetr'; $('rfMode').className = 'button primary'; $('aiMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
-    state.lastFrame = null; log('Detection mode changed to RF-DETR ONNX.');
+    if (!state.rfSession) { $('rfStatus').textContent = 'Load a trained YOLO11 ONNX model first.'; return; }
+    state.detectionMode = 'yolo'; $('rfMode').className = 'button primary'; $('aiMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
+    state.lastFrame = null; log('Detection mode changed to trained YOLO11 ONNX.');
   });
   $('trainSpecies').addEventListener('click', trainSpeciesMatcher);
   $('exportModel').addEventListener('click', exportSpeciesModel);
@@ -2044,7 +2125,7 @@
     log('Wildlife Vision web app initialising.');
     log('Runtime: ' + navigator.userAgent);
     log('Secure context: ' + (window.isSecureContext ? 'yes' : 'no') + '.');
-    log('AI detector loads on demand. RF-DETR ONNX inference is available as an experimental model-upload path; motion tracking remains available as a secondary mode.');
+    log('AI detector loads on demand. YOLO11 ONNX inference is available as an experimental model-upload path; motion tracking remains available as a secondary mode.');
     if (!window.isSecureContext) log('Use HTTPS (GitHub Pages) for camera access and SHA-256 duplicate checks.', 'warn');
     try {
       state.db = await openDatabase();

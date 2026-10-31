@@ -1772,7 +1772,7 @@
   let annotationDrag = null;
   let annotationCurrent = null;
   function normaliseRecordBoxes(record) {
-    if (Array.isArray(record.boxes)) return record.boxes.slice(0, 2).map(item => ({
+    if (Array.isArray(record.boxes)) return record.boxes.map(item => ({
       box: { ...item.box }, confidence: item.confidence ?? 1,
       source: item.source || 'legacy', review: item.review || 'reviewed'
     }));
@@ -1801,7 +1801,7 @@
       ctx.font = 'bold ' + Math.max(18, canvas.width / 35) + 'px sans-serif';
       ctx.fillText(String(index + 1), x + 5, Math.max(20, y - 6));
     });
-    $('annotationStatus').textContent = boxes.length + ' / 2 bird boxes' + (boxes.length === 2 ? ' · limit reached' : ' · draw to add another');
+    $('annotationStatus').textContent = boxes.length + ' bird boxes · draw to add another';
     $('clearAnnotation').disabled = boxes.length === 0;
     $('removeLastAnnotation').disabled = boxes.length === 0;
   }
@@ -1819,7 +1819,7 @@
   }
   $('editPreview').addEventListener('load', paintAnnotation);
   $('annotationCanvas').addEventListener('pointerdown', event => {
-    if (annotationDraft.length >= 2) return;
+    
     const canvas = $('annotationCanvas'), rect = canvas.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
@@ -1838,7 +1838,7 @@
   function finishAnnotation() {
     if (!annotationDrag) return;
     annotationDrag = null;
-    if (annotationCurrent && annotationCurrent.box.width >= 0.01 && annotationCurrent.box.height >= 0.01 && annotationDraft.length < 2) {
+    if (annotationCurrent && annotationCurrent.box.width >= 0.01 && annotationCurrent.box.height >= 0.01) {
       annotationDraft.push(annotationCurrent);
     }
     annotationCurrent = null;
@@ -1856,11 +1856,11 @@
     if (!record) return;
     record.speciesLabel = $('editLabel').value.trim() || 'Unlabelled';
     record.split = $('editSplit').value;
-    record.boxes = annotationDraft.slice(0, 2).map(item => ({
+    record.boxes = annotationDraft.map(item => ({
       box: { ...item.box },
-      confidence: item.source === 'manual' ? 1 : (item.confidence ?? 1),
-      source: 'manual',
-      review: 'reviewed'
+      confidence: item.source === 'manual' ? 1.01 : (item.confidence ?? 1),
+      source: item.source || 'manual',
+      review: item.source === 'manual' ? 'reviewed' : (item.review || 'pending')
     }));
     record.box = record.boxes.length ? { ...record.boxes[0].box } : null;
     record.boxConfidence = record.boxes.length ? record.boxes[0].confidence : null;

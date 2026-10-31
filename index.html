@@ -161,7 +161,7 @@
         <p class="helper">If you select several individual images, this label is applied to all of them. For folder imports, leave it blank to use each folder's name.</p>
         <p id="importStatus" class="helper" role="status">Your library is empty.</p>
       </div>
-      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 2 · SPECIES LABELS</p><h3>Label images in bulk</h3></div><button id="selectModeButton" class="button secondary select-mode-button">Select images</button></div><p class="muted">Select a group of images, choose Rename, and assign the correct species label. Repeat for each species group. Labels are applied before box generation and become the YOLO class names.</p></div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 2 · SPECIES LABELS</p><h3>Label images in bulk</h3></div><button id="selectModeButton" class="button secondary select-mode-button">Select images</button></div><p class="muted">Select a group of images, choose Rename, and assign its label. Use the species name for bird photos. For clear bird-free photos, use <strong>Background</strong>; keep the entire original photo and leave its box list empty. Background is a negative example, not a species class.</p></div>
       <div id="selectionBar" class="selection-bar hidden">
         <strong id="selectionCount">0 selected</strong>
         <button id="selectAllButton" class="button secondary tiny">Select all</button>
@@ -181,7 +181,7 @@
         </select>
       </div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
-      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Check boxes, then save the dataset ZIP</h3></div><button id="exportYolo" class="button secondary" disabled>Save YOLO dataset ZIP</button></div><p class="muted">Open each image with Edit, correct the boxes, and mark the annotations verified. Check images containing multiple birds individually. You can also bulk-label clear non-bird photos exactly <strong>Background</strong>; they will be exported with empty label files as negative examples.</p></div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Check boxes, then save the dataset ZIP</h3></div><button id="exportYolo" class="button secondary" disabled>Save YOLO dataset ZIP</button></div><p class="muted">Open each image with Edit, correct the boxes, and mark the annotations verified. Check images containing multiple birds individually. Keep every photo uncropped. Bulk-label bird-free scenes exactly <strong>Background</strong>, then open each one with Edit and use Clear all so it has zero boxes. The original full image is exported with an empty YOLO label file; Background is never a species class.</p></div>
     </section>
 
     <section id="diagnosticsPanel" class="panel">

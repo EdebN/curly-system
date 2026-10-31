@@ -35,6 +35,14 @@ The exporter copies each stored image's original bytes directly. It does not cro
 
 Every bounding box is exported as its own YOLO label row. An image containing three birds therefore contributes three boxes, including when the birds share a species label. A bird-free Background image is exported with an empty label file and is not added to the species list. Background-labelled images that still have boxes are skipped as negatives until those boxes are cleared.
 
+## Optional COCO background examples
+
+The Colab notebook can add a small sample of COCO 2014 images that have no annotated `bird` instances. It downloads the COCO annotation index and only the selected individual images; it does **not** download the full 13 GB `train2014.zip` archive. The default sample is 400 images, split between training and validation, with empty YOLO label files.
+
+These are negatives according to COCO's annotations, not guaranteed bird-free photographs. A small or incidental bird may be unannotated. Keep the sample modest, inspect model behaviour after training, and disable the option in the notebook if it introduces false negatives. The normal WildlifeVision background-photo workflow remains useful because those images come from the actual camera environments.
+
+Auto-annotation progress is saved to the browser's IndexedDB after each image. The app displays and logs a checkpoint every 100 processed images; these checkpoints do not delay saving until the hundredth image.
+
 ## Run locally instead
 
 Install dependencies:

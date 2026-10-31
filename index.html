@@ -205,9 +205,9 @@
   <dialog id="editDialog" class="edit-dialog">
     <form method="dialog" id="editForm">
       <div class="dialog-heading"><div><p class="eyebrow">DATASET REVIEW</p><h2>Edit image record</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
-      <div class="annotation-wrap"><img id="editPreview" class="edit-preview" alt="Selected dataset image"><canvas id="annotationCanvas" aria-label="Draw up to two bird bounding boxes"></canvas></div>
-      <p class="helper">Draw around each bird separately. You can add up to two boxes per image, including two birds of the same species. Use Remove last to correct the most recent box.</p>
-      <div class="annotation-actions"><button id="clearAnnotation" type="button" class="button tiny secondary">Clear all</button><button id="removeLastAnnotation" type="button" class="button tiny secondary" disabled>Remove last</button><span id="annotationStatus" class="helper">0 / 2 bird boxes</span></div>
+      <div class="annotation-wrap"><img id="editPreview" class="edit-preview" alt="Selected dataset image"><canvas id="annotationCanvas" aria-label="Draw bird bounding boxes"></canvas></div>
+      <p class="helper">Draw around every bird separately. Add as many boxes as the image needs, including multiple birds of the same species. Manually drawn boxes are marked as 101% certain.</p>
+      <div class="annotation-actions"><button id="clearAnnotation" type="button" class="button tiny secondary">Clear all</button><button id="removeLastAnnotation" type="button" class="button tiny secondary" disabled>Remove last</button><span id="annotationStatus" class="helper">0 bird boxes · draw to add another</span></div>
       <label class="form-label" for="editLabel">Species label</label><input id="editLabel" class="text-input" maxlength="120" placeholder="e.g. Australian magpie">
       <label class="form-label" for="editSplit">Dataset split</label><select id="editSplit" class="select-input"><option value="unassigned">Unassigned</option><option value="train">Train</option><option value="validation">Validation</option><option value="test">Test</option></select>
       <p class="helper">The species matcher learns visual examples from your labelled photos in this browser. It does not update the underlying detector weights; correct labels and varied examples improve matching.</p>

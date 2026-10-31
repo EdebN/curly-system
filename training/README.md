@@ -83,3 +83,12 @@ wildlifevision-training/
 In WildlifeVision, open **Live camera**, choose best.onnx, upload best.labels.json, and select **Load YOLO11**.
 
 The ONNX export uses a 640 × 640 input by default, raw YOLO output, and NMS disabled. WildlifeVision performs class-aware non-maximum suppression itself. Keep the original ZIP and best.pt for future fine-tuning.
+
+
+## Reducing false-positive bird detections
+
+The dataset exporter supports explicit negative/background images. Import clear photos that contain no birds and bulk-label them exactly **Background** (or use **No bird**, **No birds**, **Negative**, or **Empty scene**). Leave their bounding-box list empty. They are exported as images with empty YOLO label files, not as an extra species class.
+
+Include varied backgrounds and confusing non-bird objects, especially examples from the camera locations where false detections occur. Do not label an image as Background if it contains a bird. Keep the existing labelled bird images in the same dataset so the model learns both positive and negative examples.
+
+The live detector also ignores predictions centred in letterbox padding and applies an extra 15 percentage points of confidence to boxes touching the camera-frame boundary. This is a conservative edge filter; genuine birds partly outside the frame may be missed.

@@ -2061,9 +2061,16 @@
     const negativeLabels = new Set(['background', 'no bird', 'no birds', 'negative', 'empty scene']);
     const hasBoxes = record => Array.isArray(record.boxes) ? record.boxes.length > 0 : !!record.box;
     const labelled = state.records.filter(record => record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
-    const boxed = labelled.filter(record => hasBoxes(record));
-    const backgrounds = labelled.filter(record => !hasBoxes(record) && negativeLabels.has(record.speciesLabel.trim().toLowerCase()));
-    if (!boxed.length) { $('importStatus').textContent = 'Add reviewed bird boxes first. You can also label clear non-bird photos as Background to teach the detector what to ignore.'; return; }
+    const negativeLabelled = labelled.filter(record => negativeLabels.has(record.speciesLabel.trim().toLowerCase()));
+    // A negative/background image must stay a full, uncropped photograph and have zero boxes.
+    // Never let a stray auto-generated box turn "Background" into a YOLO species class.
+    const backgrounds = negativeLabelled.filter(record => !hasBoxes(record));
+    const backgroundsWithBoxes = negativeLabelled.filter(record => hasBoxes(record));
+    const boxed = labelled.filter(record => !negativeLabels.has(record.speciesLabel.trim().toLowerCase()) && hasBoxes(record));
+    if (!boxed.length) {
+      $('importStatus').textContent = 'Add reviewed bird boxes first. Background photos are preserved as full images, but need zero boxes and do not count as a bird class.';
+      return;
+    }
     if (!window.JSZip) { $('importStatus').textContent = 'ZIP library unavailable. Reload the page and try again.'; return; }
     const classes = [...new Set(boxed.map(record => record.speciesLabel.trim()))].sort((a,b) => a.localeCompare(b));
     const classIds = new Map(classes.map((name,index) => [name,index]));
@@ -2095,7 +2102,8 @@
           const extension = /\.(png|webp|jpe?g)$/i.exec(record.filename);
           const ext = extension ? extension[0].toLowerCase() : '.jpg';
           const base = split === 'val' ? 'validation' : split;
-          // Convert each stored image to plain binary data before giving it to JSZip.
+          // Copy the original image bytes directly. Do not crop, resize, or recompress:
+          // the detector needs the complete scene around each bird as visual context.
           // Safari can fail while JSZip's Blob worker reads File-backed IndexedDB values.
           if (!record.blob || typeof record.blob.arrayBuffer !== 'function') {
             throw new Error('Image data is missing or unreadable for "' + (record.filename || stem) + '". Re-import that image before exporting.');
@@ -2129,8 +2137,11 @@
       link.href = url; link.download = 'WildlifeVision-YOLO-dataset.zip'; document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 3000);
       yoloDatasetSaved = true;
-      $('importStatus').textContent = 'Saved ' + written + ' images (' + backgrounds.length + ' labelled background examples) across ' + classes.length + ' species. The ZIP is ready for Colab.';
-      log('Reviewed YOLO dataset ZIP saved: ' + written + ' images, including ' + backgrounds.length + ' background examples, across ' + classes.length + ' classes.');
+      const skippedBackgroundNote = backgroundsWithBoxes.length
+        ? ' ' + backgroundsWithBoxes.length + ' Background-labelled image(s) were skipped because they still contain boxes; edit them and clear all boxes to export them as negatives.'
+        : '';
+      $('importStatus').textContent = 'Saved ' + written + ' full-resolution original images (' + backgrounds.length + ' background examples) across ' + classes.length + ' bird species.' + skippedBackgroundNote + ' The ZIP is ready for Colab.';
+      log('Reviewed YOLO dataset ZIP saved: ' + written + ' original images, including ' + backgrounds.length + ' background examples; ' + backgroundsWithBoxes.length + ' background-labelled images with boxes skipped; ' + classes.length + ' bird classes.');
       renderLibrary();
     } catch (error) {
       $('importStatus').textContent = 'YOLO export failed: ' + error.message;

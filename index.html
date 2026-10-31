@@ -162,6 +162,12 @@
         <p id="importStatus" class="helper" role="status">Your library is empty.</p>
       </div>
       <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 2 · SPECIES LABELS</p><h3>Label images in bulk</h3></div><button id="selectModeButton" class="button secondary select-mode-button">Select images</button></div><p class="muted">Select a group of images, choose Rename, and assign the correct species label. Repeat for each species group. Labels are applied before box generation and become the YOLO class names.</p></div>
+      <div id="selectionBar" class="selection-bar hidden">
+        <strong id="selectionCount">0 selected</strong>
+        <button id="selectAllButton" class="button secondary tiny">Select all</button>
+        <button id="bulkChangeLabelButton" class="button primary tiny" disabled>Rename</button>
+        <button id="cancelSelectionButton" class="button secondary tiny">Cancel</button>
+      </div>
       <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 3 · PREPARE BOX SUGGESTIONS</p><h3>Train for Bounding Boxes</h3><button id="trainSpecies" class="button primary">Train for Bounding Boxes</button></div></div><p class="muted">Builds the local visual-example matcher from your labelled photos. It helps suggest a box when the generic bird detector misses one; it does not train YOLO detector weights.</p></div>
       <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 4 · GENERATE BOXES</p><h3>Auto-generate Bounding Boxes</h3></div><button id="autoAnnotate" class="button primary">Auto-generate Bounding Boxes</button></div><p class="muted">The app proposes up to two bird boxes per image. Generated boxes are marked for review and are not included in the training ZIP until verified.</p></div>
       <div class="library-toolbar">
@@ -172,12 +178,6 @@
         <select id="annotationSort" class="select-input" aria-label="Sort by detection uncertainty">
           <option value="default">Default order</option><option value="uncertain">Most uncertain first · verified last</option><option value="confident">Most confident first · verified first</option><option value="unboxed">Missing boxes first</option>
         </select>
-      </div>
-      <div id="selectionBar" class="selection-bar hidden">
-        <strong id="selectionCount">0 selected</strong>
-        <button id="selectAllButton" class="button secondary tiny">Select all</button>
-        <button id="bulkChangeLabelButton" class="button primary tiny" disabled>Rename</button>
-        <button id="cancelSelectionButton" class="button secondary tiny">Cancel</button>
       </div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
       <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Check boxes, then save the dataset ZIP</h3></div><button id="exportYolo" class="button secondary" disabled>Save YOLO dataset ZIP</button></div><p class="muted">Open each image with Edit, correct the boxes, and mark the annotations verified. Check images containing multiple birds individually. Export only after reviewing the generated boxes.</p><div class="card-heading"><div><p class="eyebrow">STEP 6 · MODEL TRAINING</p><h3>Train in Google Colab</h3></div><button id="trainYoloColab" class="button primary" disabled>Train in Colab</button></div><p class="muted">After saving the ZIP, open the Colab notebook, select a T4 GPU runtime, upload the ZIP, and run the training cell.</p></div>

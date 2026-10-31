@@ -1879,10 +1879,14 @@
 
   function csvEscape(value) { return '"' + String(value == null ? '' : value).replace(/"/g, '""') + '"'; }
   function exportCSV() {
-    const header = ['filename','species_label','split','relative_path','sha256','box_x','box_y','box_width','box_height','box_confidence','box_source'];
+    const header = ['filename','species_label','split','relative_path','sha256','box_x','box_y','box_width','box_height','box_confidence','box_source','boxes_json'];
     const lines = state.records.map((record) => {
-      const box = record.box || {};
-      return [csvEscape(record.filename),csvEscape(record.speciesLabel),record.split,csvEscape(record.relativePath),record.sha256,box.x ?? '',box.y ?? '',box.width ?? '',box.height ?? '',record.boxConfidence ?? '',record.boxSource ?? ''].join(',');
+      const boxes = normaliseRecordBoxes(record);
+      const box = boxes.length ? boxes[0].box : {};
+      const boxesJson = JSON.stringify(boxes.map(item => ({
+        box: item.box, confidence: item.confidence, source: item.source, review: item.review
+      })));
+      return [csvEscape(record.filename),csvEscape(record.speciesLabel),record.split,csvEscape(record.relativePath),record.sha256,box.x ?? '',box.y ?? '',box.width ?? '',box.height ?? '',boxes[0]?.confidence ?? '',boxes[0]?.source ?? '',csvEscape(boxesJson)].join(',');
     });
     const blob = new Blob([[header.join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);

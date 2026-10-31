@@ -1694,7 +1694,13 @@
     $('boxTotal').textContent = String(state.records.reduce((total, record) => total + (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)), 0));
     $('exportCsv').disabled = !state.records.length;
     const exportCandidates = state.records.filter(record => recordBoxes(record).length && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
-    $('exportYolo').disabled = !exportCandidates.length || !exportCandidates.every(recordIsHumanVerified);
+    // Keep export available when boxes still need review. The click handler asks
+    // for confirmation before including any unverified annotations.
+    $('exportYolo').disabled = !exportCandidates.length;
+    const unverifiedCount = exportCandidates.filter(record => !recordIsHumanVerified(record)).length;
+    $('exportYolo').title = unverifiedCount
+      ? unverifiedCount + ' image(s) still have boxes awaiting verification. You will be asked before exporting them.'
+      : 'All boxed images are verified and ready to export.';
     $('trainYoloColab').disabled = false;
     $('exportModel').disabled = !(state.trainingSamples.length || state.hasSavedTraining);
     $('clearLibrary').disabled = !state.records.length;
@@ -2068,7 +2074,14 @@
     const backgroundsWithBoxes = negativeLabelled.filter(record => hasBoxes(record));
     const boxed = labelled.filter(record => !negativeLabels.has(record.speciesLabel.trim().toLowerCase()) && hasBoxes(record));
     if (!boxed.length) {
-      $('importStatus').textContent = 'Add reviewed bird boxes first. Background photos are preserved as full images, but need zero boxes and do not count as a bird class.';
+      $('importStatus').textContent = 'Add bird boxes first. Background photos are preserved as full images, but need zero boxes and do not count as a bird class.';
+      return;
+    }
+    const unverifiedRecords = boxed.filter(record => !recordIsHumanVerified(record));
+    if (unverifiedRecords.length && !confirm(
+      unverifiedRecords.length + ' image(s) still contain boxes that have not been marked verified.\n\nExport anyway? Unchecked boxes may reduce training quality.'
+    )) {
+      $('importStatus').textContent = 'Export cancelled. Open the flagged images, correct their boxes, and mark them verified before exporting.';
       return;
     }
     if (!window.JSZip) { $('importStatus').textContent = 'ZIP library unavailable. Reload the page and try again.'; return; }
@@ -2130,7 +2143,9 @@
       // Export is read-only: do not write Blob/File records back to IndexedDB.
       // Some Safari/iOS versions reject cloning File-backed Blobs during put(),
       // which caused the export to fail before the ZIP could be generated.
-      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 3 } }, meta => {
+      // Photos are already compressed (JPEG/PNG/WebP). STORE avoids wasting
+      // CPU and extra memory trying to DEFLATE hundreds of image files.
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'STORE' }, meta => {
         $('importStatus').textContent = 'Building YOLO export ' + Math.round(meta.percent) + '%…';
       });
       const url = URL.createObjectURL(blob), link = document.createElement('a');

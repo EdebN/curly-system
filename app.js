@@ -1569,9 +1569,9 @@
     $('libraryCount').textContent = String(state.records.length);
     $('imageTotal').textContent = String(state.records.length);
     $('speciesTotal').textContent = String(species.size);
-    $('boxTotal').textContent = String(state.records.filter((record) => record.box).length);
+    $('boxTotal').textContent = String(state.records.reduce((total, record) => total + (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)), 0));
     $('exportCsv').disabled = !state.records.length;
-    $('exportYolo').disabled = !state.records.some(record => record.box && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
+    $('exportYolo').disabled = !state.records.some(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
     $('exportModel').disabled = !(state.trainingSamples.length || state.hasSavedTraining);
     $('clearLibrary').disabled = !state.records.length;
     selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
@@ -1592,7 +1592,7 @@
       const filename = document.createElement('p'); filename.textContent = record.filename; filename.title = record.filename;
       const foot = document.createElement('div'); foot.className = 'image-card-foot';
       const badge = document.createElement('span'); badge.className = 'split-badge'; badge.textContent = record.split;
-      const quality = document.createElement('span'); quality.className = 'split-badge'; quality.textContent = record.box ? (record.boxConfidence != null ? Math.round(record.boxConfidence * 100) + '% box confidence' : 'Box saved') : 'No box';
+      const quality = document.createElement('span'); quality.className = 'split-badge'; quality.textContent = (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) + ' / 2 boxes';
       const edit = document.createElement('button'); edit.className = 'edit-button'; edit.textContent = 'Edit';
       edit.addEventListener('click', (event) => { event.stopPropagation(); if (!selectionMode) editRecord(record.id); else toggleRecordSelection(record.id); });
       foot.append(badge, quality, edit); body.append(label, filename, foot); card.append(img, tick, body);
@@ -1694,17 +1694,16 @@
   }
 
   $('autoAnnotate').addEventListener('click', async () => {
-    const candidates = state.records.filter(record => !record.box);
-    if (!candidates.length) { $('importStatus').textContent = 'Every image already has a box. Use the uncertainty sort to review existing annotations.'; return; }
+    const boxCount = record => Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0);
+    const candidates = state.records.filter(record => boxCount(record) < 2);
+    if (!candidates.length) { $('importStatus').textContent = 'Every image already has two boxes. Edit records to review them.'; return; }
     const button = $('autoAnnotate'); button.disabled = true;
     try {
       if (!state.detectorModel || !state.featureModel) await loadAIModels();
       if (!state.detectorModel) throw new Error('COCO-SSD detector did not load.');
       const saved = await trainingStoreRequest('readonly', store => store.get('speciesMatcher'));
       if (saved && Array.isArray(saved.samples) && saved.samples.length) {
-        state.trainingSamples = saved.samples;
-        state.trainingReady = true;
-        state.hasSavedTraining = true;
+        state.trainingSamples = saved.samples; state.trainingReady = true; state.hasSavedTraining = true;
       }
       let found = 0, learned = 0, missed = 0, failed = 0;
       for (let i = 0; i < candidates.length; i++) {
@@ -1712,57 +1711,49 @@
         let image = null, url = null;
         try {
           url = URL.createObjectURL(record.blob);
-          image = new Image();
-          image.decoding = 'async';
-          image.src = url;
-          await image.decode();
+          image = new Image(); image.decoding = 'async'; image.src = url; await image.decode();
           const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
           const predictions = await state.detectorModel.detect(image, 20, 0.12);
-          const birds = predictions.filter(item => String(item.class).toLowerCase() === 'bird' && Array.isArray(item.bbox) && item.bbox.length >= 4);
-          birds.sort((a,b) => b.score - a.score);
-          let box = null, confidence = 0, source = '';
-          if (birds.length) {
-            const p = birds[0];
+          const birds = predictions
+            .filter(item => String(item.class).toLowerCase() === 'bird' && Array.isArray(item.bbox) && item.bbox.length >= 4)
+            .sort((a,b) => b.score - a.score)
+            .slice(0, 2);
+          const existing = Array.isArray(record.boxes) ? record.boxes.slice(0, 2) : (record.box ? [{ box: record.box, confidence: record.boxConfidence ?? 1, source: record.boxSource || 'legacy' }] : []);
+          const additions = [];
+          for (const p of birds) {
             const x = Math.max(0, Math.min(width, p.bbox[0]));
             const y = Math.max(0, Math.min(height, p.bbox[1]));
-            box = { x: x / width, y: y / height, width: Math.max(0, Math.min(1 - x / width, p.bbox[2] / width)), height: Math.max(0, Math.min(1 - y / height, p.bbox[3] / height)) };
-            confidence = Number(p.score) || 0;
-            source = 'coco-ssd-auto';
-          } else if (state.trainingReady && state.featureModel) {
-            const proposal = await proposeLearnedBox(image);
-            if (proposal) {
-              box = { x: proposal.x, y: proposal.y, width: proposal.width, height: proposal.height };
-              confidence = proposal.confidence;
-              source = 'learned-matcher-proposal';
-              learned++;
-            }
+            const box = { x: x / width, y: y / height, width: Math.max(0, Math.min(1 - x / width, p.bbox[2] / width)), height: Math.max(0, Math.min(1 - y / height, p.bbox[3] / height)) };
+            if (box.width > 0 && box.height > 0) additions.push({ box, confidence: Number(p.score) || 0, source: 'coco-ssd-auto', review: 'pending' });
           }
-          if (box && box.width > 0 && box.height > 0) {
-            record.box = box;
-            record.boxConfidence = confidence;
-            record.boxSource = source;
+          if (!additions.length && existing.length === 0 && state.trainingReady && state.featureModel) {
+            const proposal = await proposeLearnedBox(image);
+            if (proposal) { additions.push({ box: { x: proposal.x, y: proposal.y, width: proposal.width, height: proposal.height }, confidence: proposal.confidence, source: 'learned-matcher-proposal', review: 'pending' }); learned++; }
+          }
+          const combined = [...existing, ...additions].slice(0, 2);
+          if (combined.length > existing.length) {
+            record.boxes = combined;
+            record.box = combined[0].box;
+            record.boxConfidence = combined[0].confidence;
+            record.boxSource = combined[0].source;
             record.boxReview = 'pending';
             await dbRequest('readwrite', store => store.put(record));
-            found++;
+            found += combined.length - existing.length;
           } else missed++;
         } catch (error) {
-          failed++;
-          log('Auto-annotation failed for ' + record.filename + ': ' + error.message, 'warn');
-        } finally {
-          if (url) URL.revokeObjectURL(url);
-          image = null;
-        }
+          failed++; log('Auto-annotation failed for ' + record.filename + ': ' + error.message, 'warn');
+        } finally { if (url) URL.revokeObjectURL(url); image = null; }
         if ((i + 1) % 3 === 0 || i + 1 === candidates.length) {
-          $('importStatus').textContent = 'Proposing boxes ' + (i + 1) + '/' + candidates.length + ' · found ' + found + ' · learned proposals ' + learned + ' · review ' + missed + ' · errors ' + failed;
+          $('importStatus').textContent = 'Finding up to two birds ' + (i + 1) + '/' + candidates.length + ' · boxes added ' + found + ' · learned proposals ' + learned + ' · need review ' + missed + ' · errors ' + failed;
           renderLibrary();
         }
         await new Promise(resolve => setTimeout(resolve, 0));
       }
-      $('importStatus').textContent = 'Box proposals complete: ' + found + ' created (' + (found - learned) + ' COCO-SSD, ' + learned + ' learned-model proposals) · ' + missed + ' need manual review · ' + failed + ' errors. Review all automatic boxes before exporting.';
-      log('Auto-annotation complete: ' + found + ' proposals (' + learned + ' from learned matcher), ' + missed + ' unboxed, ' + failed + ' errors.');
+      $('importStatus').textContent = 'Detection complete: ' + found + ' boxes added across ' + candidates.length + ' images. Each image supports up to two birds. Review boxes before exporting.';
+      log('Two-bird auto-annotation complete: ' + found + ' boxes added, ' + missed + ' images need review, ' + failed + ' errors.');
       renderLibrary();
     } catch (error) {
-      $('importStatus').textContent = 'Could not propose boxes: ' + error.message;
+      $('importStatus').textContent = 'Could not detect birds: ' + error.message;
       log('Auto-annotation could not start: ' + error.message, 'error');
     } finally { button.disabled = false; }
   });
@@ -1859,7 +1850,7 @@
   $('exportCsv').addEventListener('click', exportCSV);
 
   $('exportYolo').addEventListener('click', async () => {
-    const boxed = state.records.filter(record => record.box && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
+    const boxed = state.records.filter(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
     if (!boxed.length) { $('importStatus').textContent = 'Annotate at least one bird bounding box before exporting a YOLO dataset.'; return; }
     if (!window.JSZip) { $('importStatus').textContent = 'ZIP library unavailable. Reload the page and try again.'; return; }
     const classes = [...new Set(boxed.map(record => record.speciesLabel.trim()))].sort((a,b) => a.localeCompare(b));
@@ -1892,10 +1883,12 @@
           const ext = extension ? extension[0].toLowerCase() : '.jpg';
           const base = split === 'val' ? 'validation' : split;
           zip.file('images/' + split + '/' + stem + ext, record.blob);
-          const b = record.box;
-          const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
-          const line = [classIds.get(record.speciesLabel.trim()), cx, cy, b.width, b.height].join(' ');
-          zip.file('labels/' + split + '/' + stem + '.txt', line + '\n');
+          const boxes = Array.isArray(record.boxes) && record.boxes.length ? record.boxes.map(item => item.box) : (record.box ? [record.box] : []);
+          const lines = boxes.slice(0, 2).map(b => {
+            const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+            return [classIds.get(record.speciesLabel.trim()), cx, cy, b.width, b.height].join(' ');
+          });
+          zip.file('labels/' + split + '/' + stem + '.txt', lines.join('\n') + (lines.length ? '\n' : ''));
           written++;
         }
       }

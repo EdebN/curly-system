@@ -13,10 +13,11 @@ Open the HTTPS GitHub Pages URL in Safari on your iPad and allow camera access. 
 - A selectable motion-tracking mode remains available for generic movement.
 - Rear-camera preview, pause/resume, zoom where supported, exclusion masks, live metrics, and diagnostics.
 - ZIP imports of species-named folders, individual image imports, local IndexedDB storage, duplicate detection, editable labels, dataset splits, search/filter, and CSV manifest export.
+- Multi-object image annotation for up to two birds per image. Both birds may share the same species label; each gets an independent bounding box, and the YOLO export writes one label row per bird.
 
 ## AI behaviour and limitations
 
-The generic detector uses a pretrained COCO-SSD model to locate objects classified as birds. It is not a specialised bird-only model and can miss distant, occluded, or unusual birds.
+The generic detector uses a pretrained COCO-SSD model to locate objects classified as birds. Auto-annotation keeps up to the two strongest distinct bird boxes per image, avoiding near-identical overlapping proposals. It is not a specialised bird-only model and can miss distant, occluded, or unusual birds. The annotation editor lets you add, remove, and correct up to two boxes manually. Each box is reviewed independently, while the image's species label is shared by both boxes.
 
 The species matcher is **example-based visual similarity**, not full neural-network fine-tuning. It extracts MobileNet features from labelled images and compares live bird crops against those examples. Clear photos where the bird fills much of the image and several views per species work best. Similar-looking species can be confused; treat the result as a suggestion, not a confirmed identification. Use **Learn from labelled photos** again after changing labels or adding examples. The learned feature set exists in memory for the current page session and must be rebuilt after reloading.
 

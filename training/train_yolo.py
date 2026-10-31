@@ -123,7 +123,7 @@ def validate_labels(dataset_root: Path, names: list[str]) -> dict[str, int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train and export WildlifeVision YOLO11.")
     parser.add_argument("dataset", type=Path, help="Bird Library YOLO ZIP export or extracted dataset folder.")
-    parser.add_argument("--model", default="yolo11n.pt", help="Ultralytics starting checkpoint (default: yolo11n.pt).")
+    parser.add_argument("--model", default="yolo11n.pt", help="Starting checkpoint: yolo11n.pt for a new model, or a previous best.pt to fine-tune.")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=-1, help="-1 lets Ultralytics estimate a safe batch size.")
@@ -165,7 +165,9 @@ def main() -> int:
     print(f"  Bounding boxes: {counts}")
     for index, name in enumerate(names):
         print(f"  {index:>2}: {name}")
-    print("\nStarting Ultralytics training. A GPU is recommended; CPU training is supported but slow.\n")
+    print("\nStarting Ultralytics training. A GPU is recommended; CPU training is supported but slow.")
+    print(f"  Starting checkpoint: {args.model}")
+    print("  Existing weights will be reused where layer shapes match; the detection head is adapted when the class list changes.\n")
 
     if args.resume:
         last_checkpoint = output / "runs" / args.name / "weights" / "last.pt"
@@ -220,6 +222,7 @@ def main() -> int:
     summary = {
         "architecture": "Ultralytics YOLO11",
         "checkpoint": str(best_pt),
+        "fine_tuned_from": args.model,
         "onnx": str(onnx_path),
         "labels": str(labels_path),
         "input_size": args.imgsz,

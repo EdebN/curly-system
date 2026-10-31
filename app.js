@@ -1720,11 +1720,21 @@
             .slice(0, 2);
           const existing = Array.isArray(record.boxes) ? record.boxes.slice(0, 2) : (record.box ? [{ box: record.box, confidence: record.boxConfidence ?? 1, source: record.boxSource || 'legacy' }] : []);
           const additions = [];
+          const overlapRatio = (a, b) => {
+            const left = Math.max(a.x, b.x), top = Math.max(a.y, b.y);
+            const right = Math.min(a.x + a.width, b.x + b.width);
+            const bottom = Math.min(a.y + a.height, b.y + b.height);
+            const intersection = Math.max(0, right - left) * Math.max(0, bottom - top);
+            const union = a.width * a.height + b.width * b.height - intersection;
+            return union > 0 ? intersection / union : 0;
+          };
           for (const p of birds) {
+            if (existing.length + additions.length >= 2) break;
             const x = Math.max(0, Math.min(width, p.bbox[0]));
             const y = Math.max(0, Math.min(height, p.bbox[1]));
             const box = { x: x / width, y: y / height, width: Math.max(0, Math.min(1 - x / width, p.bbox[2] / width)), height: Math.max(0, Math.min(1 - y / height, p.bbox[3] / height)) };
-            if (box.width > 0 && box.height > 0) additions.push({ box, confidence: Number(p.score) || 0, source: 'coco-ssd-auto', review: 'pending' });
+            const duplicates = [...existing, ...additions].some(item => overlapRatio(item.box, box) > 0.65);
+            if (box.width > 0 && box.height > 0 && !duplicates) additions.push({ box, confidence: Number(p.score) || 0, source: 'coco-ssd-auto', review: 'pending' });
           }
           if (!additions.length && existing.length === 0 && state.trainingReady && state.featureModel) {
             const proposal = await proposeLearnedBox(image);

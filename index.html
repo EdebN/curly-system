@@ -94,7 +94,7 @@
           </div>
           <div class="card">
             <div class="card-heading"><div><p class="eyebrow">AI DETECTION</p><h3>Detection settings</h3></div></div>
-            <div class="setting"><div class="setting-label"><label for="aiThreshold">Minimum confidence</label><strong id="aiThresholdValue">45%</strong></div><input id="aiThreshold" type="range" min="20" max="90" value="45"><p class="helper">This threshold affects the pretrained detector. Learned-example matching uses a separate similarity threshold.</p></div>
+            <div class="setting"><div class="setting-label"><label for="aiThreshold">Minimum confidence</label><strong id="aiThresholdValue">45%</strong></div><input id="aiThreshold" type="range" min="20" max="90" value="45"><p class="helper">This is the minimum YOLO confidence. Detections touching the camera-frame edge need an extra 15 percentage points. Clear non-bird photos labelled Background are included as negative training examples.</p></div>
             <div class="setting toggle-setting"><label for="showMotion">Show detection boxes</label><input id="showMotion" type="checkbox" checked></div>
             <div class="setting toggle-setting"><label for="showMasks">Show exclusion masks</label><input id="showMasks" type="checkbox" checked></div>
             <button id="clearMasks" class="button secondary full">Clear masks</button>
@@ -181,7 +181,7 @@
         </select>
       </div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
-      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Check boxes, then save the dataset ZIP</h3></div><button id="exportYolo" class="button secondary" disabled>Save YOLO dataset ZIP</button></div><p class="muted">Open each image with Edit, correct the boxes, and mark the annotations verified. Check images containing multiple birds individually. Export only after reviewing the generated boxes.</p></div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Check boxes, then save the dataset ZIP</h3></div><button id="exportYolo" class="button secondary" disabled>Save YOLO dataset ZIP</button></div><p class="muted">Open each image with Edit, correct the boxes, and mark the annotations verified. Check images containing multiple birds individually. You can also bulk-label clear non-bird photos exactly <strong>Background</strong>; they will be exported with empty label files as negative examples.</p></div>
     </section>
 
     <section id="diagnosticsPanel" class="panel">

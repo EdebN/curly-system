@@ -484,7 +484,7 @@
       $('detectionReadout').textContent = 'OBJECTS ' + state.aiDetections.length;
       renderTracks();
       $('aiStatus').textContent = detections.length
-        ? state.aiDetections.length + ' YOLO detection(s) · ' + classCount + ' classes · ' + Math.round(state.lastInferenceMs) + ' ms. Confidence is a model score, not certainty.'
+        ? state.aiDetections.length + ' YOLO detection(s) · ' + classCount + ' classes · ' + Math.round(performance.now() - inferenceStarted) + ' ms. Confidence is a model score, not certainty.'
         : 'No detections passed the confidence threshold. Lower the confidence slider to inspect weaker candidates.';
     } catch (error) {
       $('rfStatus').textContent = 'YOLO inference error: ' + error.message;
@@ -897,7 +897,7 @@
     const active = state.spatialTracks.filter((track) => track.missed === 0 && track.visible);
     $('spatialCount').textContent = String(active.length);
     $('sceneSummary').textContent = active.length
-      ? active.map((track) => track.label + ' · ' + relativePosition(track.cx, track.cy) + (isPriorityLearnedDetection(track.item) ? ' · learned target' : ' · moving')).slice(0, 3).join(' | ')
+      ? active.map((track) => track.label + ' · ' + relativePosition(track.cx, track.cy) + (track.item && track.item.prediction && track.item.prediction.customDetector ? ' · YOLO detection' : isPriorityLearnedDetection(track.item) ? ' · learned target' : ' · moving')).slice(0, 3).join(' | ')
       : 'No moving objects or learned targets in view';
     return relevant;
   }
@@ -1185,7 +1185,7 @@
     if (state.detectionMode === 'ai' || state.detectionMode === 'yolo') {
       if (!state.aiDetections.length) {
         root.className = 'empty-state';
-        root.textContent = state.cameraRunning ? 'Waiting for moving objects or learned species targets. Stationary generic objects are hidden.' : 'Load the AI models and start the camera to detect relevant wildlife.';
+        root.textContent = state.cameraRunning ? (state.detectionMode === 'yolo' ? 'Waiting for YOLO detections. Lower the confidence threshold to inspect weaker candidates.' : 'Waiting for moving objects or learned species targets. Stationary generic objects are hidden.') : 'Load a detector and start the camera to detect wildlife.';
         return;
       }
       root.className = 'track-list';

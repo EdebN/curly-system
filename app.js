@@ -1976,7 +1976,7 @@
           const base = split === 'val' ? 'validation' : split;
           zip.file('images/' + split + '/' + stem + ext, record.blob);
           const boxes = Array.isArray(record.boxes) && record.boxes.length ? record.boxes.map(item => item.box) : (record.box ? [record.box] : []);
-          const lines = boxes.slice(0, 2).map(b => {
+          const lines = boxes.map(b => {
             const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
             return [classIds.get(record.speciesLabel.trim()), cx, cy, b.width, b.height].join(' ');
           });
@@ -1984,7 +1984,9 @@
           written++;
         }
       }
-      await Promise.all(state.records.filter(record => boxed.includes(record)).map(record => dbRequest('readwrite', store => store.put(record))));
+      // Export is read-only: do not write Blob/File records back to IndexedDB.
+      // Some Safari/iOS versions reject cloning File-backed Blobs during put(),
+      // which caused the export to fail before the ZIP could be generated.
       const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 3 } }, meta => {
         $('importStatus').textContent = 'Building YOLO export ' + Math.round(meta.percent) + '%…';
       });

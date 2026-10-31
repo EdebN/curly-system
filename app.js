@@ -1758,28 +1758,49 @@
     } finally { button.disabled = false; }
   });
 
-  let annotationDraft = null;
+  let annotationDraft = [];
   let annotationDrag = null;
+  let annotationCurrent = null;
+  function normaliseRecordBoxes(record) {
+    if (Array.isArray(record.boxes)) return record.boxes.slice(0, 2).map(item => ({
+      box: { ...item.box }, confidence: item.confidence ?? 1,
+      source: item.source || 'legacy', review: item.review || 'reviewed'
+    }));
+    return record.box ? [{
+      box: { ...record.box }, confidence: record.boxConfidence ?? 1,
+      source: record.boxSource || 'legacy', review: record.boxReview || 'reviewed'
+    }] : [];
+  }
   function paintAnnotation() {
     const canvas = $('annotationCanvas'), image = $('editPreview');
     if (!canvas || !image.naturalWidth) return;
     canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const box = annotationDraft;
-    if (box) {
-      ctx.strokeStyle = '#b7ef83'; ctx.lineWidth = Math.max(3, canvas.width / 300);
-      ctx.fillStyle = '#b7ef8330';
-      ctx.fillRect(box.x * canvas.width, box.y * canvas.height, box.width * canvas.width, box.height * canvas.height);
-      ctx.strokeRect(box.x * canvas.width, box.y * canvas.height, box.width * canvas.width, box.height * canvas.height);
-    }
-    $('annotationStatus').textContent = box ? 'Bird box: ' + Math.round(box.width * 100) + '% × ' + Math.round(box.height * 100) + '% of image' : 'No bounding box';
+    const boxes = annotationCurrent ? [...annotationDraft, annotationCurrent] : annotationDraft;
+    boxes.forEach((item, index) => {
+      const box = item.box || item;
+      const x = box.x * canvas.width, y = box.y * canvas.height;
+      const width = box.width * canvas.width, height = box.height * canvas.height;
+      ctx.strokeStyle = index === boxes.length - 1 && annotationCurrent ? '#ffffff' : '#b7ef83';
+      ctx.lineWidth = Math.max(3, canvas.width / 300);
+      ctx.fillStyle = '#b7ef8325';
+      ctx.fillRect(x, y, width, height);
+      ctx.strokeRect(x, y, width, height);
+      ctx.fillStyle = '#b7ef83';
+      ctx.font = 'bold ' + Math.max(18, canvas.width / 35) + 'px sans-serif';
+      ctx.fillText(String(index + 1), x + 5, Math.max(20, y - 6));
+    });
+    $('annotationStatus').textContent = boxes.length + ' / 2 bird boxes' + (boxes.length === 2 ? ' · limit reached' : ' · draw to add another');
+    $('clearAnnotation').disabled = boxes.length === 0;
+    $('removeLastAnnotation').disabled = boxes.length === 0;
   }
   function editRecord(id) {
     const record = state.records.find((item) => item.id === id);
     if (!record) return;
     state.editingId = id;
-    annotationDraft = record.box ? { ...record.box } : null;
+    annotationDraft = normaliseRecordBoxes(record);
+    annotationCurrent = null;
     $('editPreview').src = imageURL(record);
     $('editLabel').value = record.speciesLabel;
     $('editSplit').value = record.split;
@@ -1788,30 +1809,35 @@
   }
   $('editPreview').addEventListener('load', paintAnnotation);
   $('annotationCanvas').addEventListener('pointerdown', event => {
+    if (annotationDraft.length >= 2) return;
     const canvas = $('annotationCanvas'), rect = canvas.getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
     annotationDrag = { x, y };
-    annotationDraft = { x, y, width: 0, height: 0 };
+    annotationCurrent = { box: { x, y, width: 0, height: 0 }, confidence: 1, source: 'manual', review: 'reviewed' };
     canvas.setPointerCapture(event.pointerId); paintAnnotation();
   });
   $('annotationCanvas').addEventListener('pointermove', event => {
-    if (!annotationDrag) return;
+    if (!annotationDrag || !annotationCurrent) return;
     const rect = $('annotationCanvas').getBoundingClientRect();
     const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
     const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
-    annotationDraft = { x: Math.min(annotationDrag.x, x), y: Math.min(annotationDrag.y, y), width: Math.abs(x - annotationDrag.x), height: Math.abs(y - annotationDrag.y) };
+    annotationCurrent.box = { x: Math.min(annotationDrag.x, x), y: Math.min(annotationDrag.y, y), width: Math.abs(x - annotationDrag.x), height: Math.abs(y - annotationDrag.y) };
     paintAnnotation();
   });
   function finishAnnotation() {
     if (!annotationDrag) return;
     annotationDrag = null;
-    if (annotationDraft && (annotationDraft.width < 0.01 || annotationDraft.height < 0.01)) annotationDraft = null;
+    if (annotationCurrent && annotationCurrent.box.width >= 0.01 && annotationCurrent.box.height >= 0.01 && annotationDraft.length < 2) {
+      annotationDraft.push(annotationCurrent);
+    }
+    annotationCurrent = null;
     paintAnnotation();
   }
   $('annotationCanvas').addEventListener('pointerup', finishAnnotation);
   $('annotationCanvas').addEventListener('pointercancel', finishAnnotation);
-  $('clearAnnotation').addEventListener('click', () => { annotationDraft = null; paintAnnotation(); });
+  $('clearAnnotation').addEventListener('click', () => { annotationDraft = []; annotationCurrent = null; paintAnnotation(); });
+  $('removeLastAnnotation').addEventListener('click', () => { annotationDraft.pop(); paintAnnotation(); });
 
   $('editForm').addEventListener('submit', async (event) => {
     if (event.submitter && event.submitter.value !== 'save') return;
@@ -1820,9 +1846,16 @@
     if (!record) return;
     record.speciesLabel = $('editLabel').value.trim() || 'Unlabelled';
     record.split = $('editSplit').value;
-    record.box = annotationDraft && annotationDraft.width > 0.01 && annotationDraft.height > 0.01 ? { ...annotationDraft } : null;
-    if (record.box) { record.boxConfidence = record.boxSource === 'coco-ssd-auto' ? record.boxConfidence : 1; record.boxSource = 'manual'; }
-    else { record.boxConfidence = null; record.boxSource = null; }
+    record.boxes = annotationDraft.slice(0, 2).map(item => ({
+      box: { ...item.box },
+      confidence: item.source === 'manual' ? 1 : (item.confidence ?? 1),
+      source: 'manual',
+      review: 'reviewed'
+    }));
+    record.box = record.boxes.length ? { ...record.boxes[0].box } : null;
+    record.boxConfidence = record.boxes.length ? record.boxes[0].confidence : null;
+    record.boxSource = record.boxes.length ? 'manual' : null;
+    record.boxReview = record.boxes.length ? 'reviewed' : null;
     try {
       await dbRequest('readwrite', (store) => store.put(record));
       $('editDialog').close();

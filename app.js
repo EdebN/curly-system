@@ -1826,10 +1826,117 @@
     };
   }
 
+  async function detectYoloOnImage(image) {
+    if (!state.rfSession || !window.ort) throw new Error('Load your trained YOLO11 ONNX model first.');
+    const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
+    const side = state.rfInputSize || 640;
+    const inputCanvas = document.createElement('canvas');
+    inputCanvas.width = side; inputCanvas.height = side;
+    const ctx = inputCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = 'rgb(114,114,114)'; ctx.fillRect(0, 0, side, side);
+    const scale = Math.min(side / width, side / height);
+    const drawW = Math.round(width * scale), drawH = Math.round(height * scale);
+    const offX = Math.floor((side - drawW) / 2), offY = Math.floor((side - drawH) / 2);
+    ctx.drawImage(image, 0, 0, width, height, offX, offY, drawW, drawH);
+    const pixels = ctx.getImageData(0, 0, side, side).data, plane = side * side;
+    const input = new Float32Array(plane * 3);
+    for (let p = 0; p < plane; p++) {
+      input[p] = pixels[p * 4] / 255;
+      input[plane + p] = pixels[p * 4 + 1] / 255;
+      input[plane * 2 + p] = pixels[p * 4 + 2] / 255;
+    }
+    const result = await state.rfSession.run({
+      [state.rfSession.inputNames[0]]: new window.ort.Tensor('float32', input, [1, 3, side, side])
+    });
+    const output = result[state.rfSession.outputNames[0]], dims = output && output.dims ? output.dims : [];
+    if (dims.length !== 3 || dims[0] !== 1) throw new Error('Unsupported YOLO output. Export the model with nms=False.');
+    const channelsFirst = dims[1] < dims[2];
+    const channelCount = channelsFirst ? dims[1] : dims[2];
+    const boxCount = channelsFirst ? dims[2] : dims[1];
+    const classCount = channelCount - 4;
+    if (classCount < 1) throw new Error('YOLO output contains no classes.');
+    const at = (anchor, channel) => channelsFirst
+      ? output.data[channel * boxCount + anchor]
+      : output.data[anchor * channelCount + channel];
+    const found = [];
+    for (let i = 0; i < boxCount; i++) {
+      let score = -Infinity, classId = 0;
+      for (let c = 0; c < classCount; c++) {
+        const raw = at(i, c + 4), confidence = raw >= 0 && raw <= 1 ? raw : 1 / (1 + Math.exp(-raw));
+        if (confidence > score) { score = confidence; classId = c; }
+      }
+      if (score < Math.max(0.18, Math.min(0.4, state.aiThreshold * 0.75))) continue;
+      let cx = at(i, 0), cy = at(i, 1), w = at(i, 2), h = at(i, 3);
+      if (Math.max(Math.abs(cx), Math.abs(cy), Math.abs(w), Math.abs(h)) <= 2) {
+        cx *= side; cy *= side; w *= side; h *= side;
+      }
+      if (cx < offX || cx > offX + drawW || cy < offY || cy > offY + drawH) continue;
+      const left = Math.max(0, Math.min(width, (cx - w / 2 - offX) / scale));
+      const top = Math.max(0, Math.min(height, (cy - h / 2 - offY) / scale));
+      const right = Math.max(0, Math.min(width, (cx + w / 2 - offX) / scale));
+      const bottom = Math.max(0, Math.min(height, (cy + h / 2 - offY) / scale));
+      if (right - left < 5 || bottom - top < 5) continue;
+      found.push({
+        box: { x: left / width, y: top / height, width: (right - left) / width, height: (bottom - top) / height },
+        score, label: state.rfLabels[classId] || ('class_' + classId), source: 'yolo11-onnx'
+      });
+    }
+    found.sort((a, b) => b.score - a.score);
+    const kept = [];
+    for (const item of found) {
+      if (kept.some(other => overlapRatio(item.box, other.box) > 0.45)) continue;
+      kept.push(item);
+      if (kept.length >= 30) break;
+    }
+    return kept;
+  }
+
+  function overlapRatio(a, b) {
+    const left = Math.max(a.x, b.x), top = Math.max(a.y, b.y);
+    const right = Math.min(a.x + a.width, b.x + b.width);
+    const bottom = Math.min(a.y + a.height, b.y + b.height);
+    const intersection = Math.max(0, right - left) * Math.max(0, bottom - top);
+    const union = a.width * a.height + b.width * b.height - intersection;
+    return union > 0 ? intersection / union : 0;
+  }
+
+  async function detectLearnedRegions(image) {
+    if (!state.featureModel || !state.trainingReady || !state.trainingSamples.length) {
+      throw new Error('Train or import your WildlifeVision species matcher first.');
+    }
+    const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
+    const minSide = Math.min(width, height), windows = [];
+    for (const fraction of [0.22, 0.32, 0.44, 0.58]) {
+      const side = Math.max(28, Math.round(minSide * fraction));
+      const maxX = Math.max(0, width - side), maxY = Math.max(0, height - side);
+      for (const py of [0, 0.25, 0.5, 0.75, 1]) for (const px of [0, 0.25, 0.5, 0.75, 1]) {
+        windows.push({ x: Math.round(maxX * px), y: Math.round(maxY * py),
+          width: Math.min(side, width), height: Math.min(side, height) });
+      }
+    }
+    const hits = [];
+    for (let i = 0; i < windows.length; i++) {
+      const box = windows[i], match = await classifyStaticRegion(image, box);
+      if (match.label !== 'Unmatched' && match.similarity >= 0.66) {
+        hits.push({
+          box: { x: box.x / width, y: box.y / height, width: box.width / width, height: box.height / height },
+          score: match.similarity, label: match.label, source: 'wildlifevision-learned'
+        });
+      }
+      if (i % 5 === 4) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    hits.sort((a, b) => b.score - a.score);
+    const kept = [];
+    for (const hit of hits) {
+      if (kept.some(other => overlapRatio(hit.box, other.box) > 0.28)) continue;
+      kept.push(hit);
+      if (kept.length >= 8) break;
+    }
+    return kept;
+  }
+
   $('autoAnnotate').addEventListener('click', async () => {
     const protectedRecord = record => recordBoxes(record).some(isHumanVerifiedBox);
-    // Revisit every machine-generated annotation, including records already at two boxes.
-    // Any image containing a human-verified or manually drawn box is left completely alone.
     const candidates = state.records.filter(record =>
       !protectedRecord(record) &&
       !['background', 'no bird', 'no birds', 'negative', 'empty scene'].includes(String(record.speciesLabel || '').trim().toLowerCase())
@@ -1841,123 +1948,141 @@
     const button = $('autoAnnotate'); button.disabled = true;
     yoloDatasetSaved = false;
     try {
-      if (!state.detectorModel) await loadAIModels();
-      if (!state.detectorModel) throw new Error('COCO-SSD detector did not load.');
+      if (!state.detectorModel || !state.featureModel) await loadAIModels();
+      if (!state.rfSession) throw new Error('Load your trained YOLO11 ONNX model in the Model panel first.');
+      if (!state.trainingReady || !state.trainingSamples.length) throw new Error('Train or import your WildlifeVision species matcher first.');
       const passes = 3;
-      const overlapRatio = (a, b) => {
-        const left = Math.max(a.x, b.x), top = Math.max(a.y, b.y);
-        const right = Math.min(a.x + a.width, b.x + b.width);
-        const bottom = Math.min(a.y + a.height, b.y + b.height);
-        const intersection = Math.max(0, right - left) * Math.max(0, bottom - top);
-        const union = a.width * a.height + b.width * b.height - intersection;
-        return union > 0 ? intersection / union : 0;
-      };
-      let found = 0, improved = 0, missed = 0, failed = 0;
+      let found = 0, improved = 0, missed = 0, failed = 0, cocoTotal = 0, yoloTotal = 0, learnedTotal = 0;
       for (let i = 0; i < candidates.length; i++) {
         const record = candidates[i];
         let image = null, url = null;
         try {
-          // Re-check immediately before processing so a concurrently edited record is protected.
           if (protectedRecord(record)) { missed++; continue; }
           url = URL.createObjectURL(record.blob);
           image = new Image(); image.decoding = 'async'; image.src = url; await image.decode();
           const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
-          const detections = [];
+          const raw = [];
+
+          // COCO-SSD: three independent passes, retaining detections from every pass.
+          const cocoDetections = [];
           for (let pass = 0; pass < passes; pass++) {
-            const predictions = await state.detectorModel.detect(image, 20, 0.10);
-            predictions
-              .filter(item => String(item.class).toLowerCase() === 'bird' && Array.isArray(item.bbox) && item.bbox.length >= 4)
-              .forEach(item => {
-                const x = Math.max(0, Math.min(width, item.bbox[0]));
-                const y = Math.max(0, Math.min(height, item.bbox[1]));
-                const box = {
-                  x: x / width, y: y / height,
-                  width: Math.max(0, Math.min(1 - x / width, item.bbox[2] / width)),
-                  height: Math.max(0, Math.min(1 - y / height, item.bbox[3] / height))
-                };
-                if (box.width > 0 && box.height > 0) detections.push({ box, score: Number(item.score) || 0, pass });
-              });
-            // Yield between full-image passes to keep the browser responsive.
+            const predictions = await state.detectorModel.detect(image, 30, 0.10);
+            predictions.filter(item => String(item.class).toLowerCase() === 'bird' &&
+              Array.isArray(item.bbox) && item.bbox.length >= 4).forEach(item => {
+              const x = Math.max(0, Math.min(width, item.bbox[0]));
+              const y = Math.max(0, Math.min(height, item.bbox[1]));
+              const box = { x: x / width, y: y / height,
+                width: Math.max(0, Math.min(1 - x / width, item.bbox[2] / width)),
+                height: Math.max(0, Math.min(1 - y / height, item.bbox[3] / height)) };
+              if (box.width > 0 && box.height > 0) cocoDetections.push({ box, score: Number(item.score) || 0, pass, label: 'bird', source: 'coco-ssd' });
+            });
             await new Promise(resolve => setTimeout(resolve, 0));
           }
-
-          // Cluster overlapping predictions from separate passes. Average coordinates
-          // using confidence weights so repeated detections refine the final rectangle.
-          const clusters = [];
-          detections.sort((a, b) => b.score - a.score);
-          for (const detection of detections) {
+          const cocoClusters = [];
+          cocoDetections.sort((a, b) => b.score - a.score);
+          for (const item of cocoDetections) {
             let best = null, bestIoU = 0;
-            for (const cluster of clusters) {
-              if (cluster.passSet.has(detection.pass)) continue;
-              const iou = overlapRatio(cluster.box, detection.box);
+            for (const cluster of cocoClusters) {
+              if (cluster.passSet.has(item.pass)) continue;
+              const iou = overlapRatio(cluster.box, item.box);
               if (iou > 0.35 && iou > bestIoU) { best = cluster; bestIoU = iou; }
             }
-            if (!best) {
-              clusters.push({
-                members: [detection], passSet: new Set([detection.pass]),
-                box: { ...detection.box }, score: detection.score
-              });
-            } else {
-              best.members.push(detection);
-              best.passSet.add(detection.pass);
-              const totalWeight = best.members.reduce((sum, item) => sum + Math.max(0.05, item.score), 0);
+            if (!best) cocoClusters.push({ box: { ...item.box }, score: item.score, members: [item], passSet: new Set([item.pass]) });
+            else {
+              best.members.push(item); best.passSet.add(item.pass);
+              const weight = best.members.reduce((sum, member) => sum + Math.max(0.05, member.score), 0);
               for (const key of ['x', 'y', 'width', 'height']) {
-                best.box[key] = best.members.reduce((sum, item) => sum + item.box[key] * Math.max(0.05, item.score), 0) / totalWeight;
+                best.box[key] = best.members.reduce((sum, member) => sum + member.box[key] * Math.max(0.05, member.score), 0) / weight;
               }
-              best.score = best.members.reduce((sum, item) => sum + item.score, 0) / best.members.length;
+              best.score = best.members.reduce((sum, member) => sum + member.score, 0) / best.members.length;
             }
           }
-          const consensus = clusters
-            .filter(cluster => cluster.passSet.size >= 2 || cluster.score >= 0.50)
-            .sort((a, b) => b.passSet.size - a.passSet.size || b.score - a.score)
-            .slice(0, 2)
-            .map(cluster => ({
-              box: cluster.box,
-              confidence: Math.min(0.99, cluster.score * (cluster.passSet.size / passes + 0.5)),
-              source: 'coco-ssd-consensus',
-              review: 'pending'
-            }));
+          cocoClusters.filter(cluster => cluster.passSet.size >= 2 || cluster.score >= 0.62)
+            .forEach(cluster => raw.push({ box: cluster.box, score: cluster.score,
+              label: 'bird', source: 'coco-ssd', support: cluster.passSet.size }));
+          cocoTotal += cocoClusters.length;
 
-          if (consensus.length) {
+          // The user's trained YOLO11 detector contributes species-specific boxes.
+          const yolo = await detectYoloOnImage(image);
+          raw.push(...yolo); yoloTotal += yolo.length;
+
+          // MobileNet example matcher independently scans overlapping regions.
+          const learned = await detectLearnedRegions(image);
+          raw.push(...learned); learnedTotal += learned.length;
+
+          // Fuse overlapping proposals across models. Keep strong single-model hits;
+          // agreement raises confidence but is not required for a valid small bird.
+          raw.sort((a, b) => b.score - a.score);
+          const fused = [];
+          for (const item of raw) {
+            let best = null, bestIoU = 0;
+            for (const cluster of fused) {
+              const iou = overlapRatio(cluster.box, item.box);
+              if (iou > 0.30 && iou > bestIoU) { best = cluster; bestIoU = iou; }
+            }
+            if (!best) {
+              fused.push({ box: { ...item.box }, members: [item], sources: new Set([item.source]), score: item.score, label: item.label });
+            } else {
+              best.members.push(item); best.sources.add(item.source);
+              const weight = best.members.reduce((sum, member) => sum + Math.max(0.05, member.score), 0);
+              for (const key of ['x', 'y', 'width', 'height']) {
+                best.box[key] = best.members.reduce((sum, member) => sum + member.box[key] * Math.max(0.05, member.score), 0) / weight;
+              }
+              best.score = best.members.reduce((sum, member) => sum + member.score, 0) / best.members.length;
+              const strongestLabel = best.members.slice().sort((a, b) => b.score - a.score)[0];
+              if (strongestLabel.label && strongestLabel.label !== 'bird') best.label = strongestLabel.label;
+            }
+          }
+          const accepted = fused.filter(cluster => {
+            const sources = cluster.sources;
+            return sources.size >= 2 ||
+              (sources.has('yolo11-onnx') && cluster.members.some(item => item.source === 'yolo11-onnx' && item.score >= Math.max(0.28, state.aiThreshold * 0.8))) ||
+              (sources.has('coco-ssd') && cluster.members.some(item => item.source === 'coco-ssd' && item.score >= 0.68)) ||
+              (sources.has('wildlifevision-learned') && cluster.members.some(item => item.source === 'wildlifevision-learned' && item.score >= 0.72));
+          }).sort((a, b) => b.sources.size - a.sources.size || b.score - a.score).slice(0, 12);
+
+          const boxes = accepted.map(cluster => ({
+            box: cluster.box,
+            confidence: Math.min(0.99, cluster.sources.size > 1
+              ? cluster.score + 0.08 * (cluster.sources.size - 1) : cluster.score),
+            source: 'ensemble:' + [...cluster.sources].join('+'),
+            speciesLabel: cluster.label === 'bird' ? (record.speciesLabel || 'Unlabelled') : cluster.label,
+            review: 'pending'
+          }));
+          if (boxes.length) {
             const previousCount = recordBoxes(record).length;
-            record.boxes = consensus;
-            record.box = consensus[0].box;
-            record.boxConfidence = consensus[0].confidence;
-            record.boxSource = consensus[0].source;
+            record.boxes = boxes;
+            record.box = boxes[0].box;
+            record.boxConfidence = boxes[0].confidence;
+            record.boxSource = boxes[0].source;
             record.boxReview = 'pending';
             await dbRequest('readwrite', store => store.put(record));
-            found += consensus.length;
+            found += boxes.length;
             if (previousCount) improved++;
-          } else {
-            missed++;
-          }
+          } else missed++;
         } catch (error) {
-          failed++; log('COCO multi-pass annotation failed for ' + record.filename + ': ' + error.message, 'warn');
+          failed++; log('Ensemble auto-annotation failed for ' + record.filename + ': ' + error.message, 'warn');
         } finally { if (url) URL.revokeObjectURL(url); image = null; }
         if ((i + 1) % 100 === 0 || i + 1 === candidates.length) {
-          // Every successful record write above is already committed to IndexedDB.
-          // This is a visible 100-image checkpoint, not a delayed batch save.
           $('importStatus').textContent = 'Checkpoint saved · ' + (i + 1) + '/' + candidates.length +
-            ' images processed · 3 COCO passes/image · consensus boxes ' + found +
-            ' · refreshed auto-box images ' + improved + ' · no consensus ' + missed + ' · errors ' + failed;
-          log('Auto-box checkpoint: ' + (i + 1) + '/' + candidates.length +
-            ' images processed. All completed image annotations are already saved locally.');
+            ' images · boxes ' + found + ' · COCO ' + cocoTotal + ' · YOLO ' + yoloTotal +
+            ' · learned scans ' + learnedTotal + ' · no boxes ' + missed + ' · errors ' + failed;
+          log('Three-model checkpoint: ' + (i + 1) + '/' + candidates.length + '. Completed annotations are already saved locally.');
           renderLibrary();
         }
         await new Promise(resolve => setTimeout(resolve, 0));
       }
       const protectedCount = state.records.filter(protectedRecord).length;
-      $('importStatus').textContent = 'COCO finished: ' + found + ' consensus boxes across ' + candidates.length +
-        ' eligible images. Ran 3 passes per image; refreshed ' + improved +
-        ' previously auto-annotated images. ' + protectedCount +
-        ' images with human-verified or manually modified boxes were untouched. Review all new boxes.';
-      log('COCO three-pass annotation complete: ' + found + ' consensus boxes; ' + improved +
-        ' existing auto-box images refreshed; ' + missed + ' images had no reliable consensus; ' +
-        protectedCount + ' human-verified/manual images skipped; ' + failed + ' errors.');
+      $('importStatus').textContent = 'Ensemble finished: ' + found + ' boxes across ' + candidates.length +
+        ' images. COCO-SSD, trained YOLO11 and the WildlifeVision learned matcher all contributed. Review pending boxes.';
+      log('Three-model annotation complete: ' + found + ' boxes; COCO proposals ' + cocoTotal +
+        ', YOLO proposals ' + yoloTotal + ', learned-region proposals ' + learnedTotal +
+        '; ' + missed + ' images had no accepted boxes; ' + protectedCount +
+        ' human-verified/manual images skipped; ' + failed + ' errors.');
       renderLibrary();
     } catch (error) {
-      $('importStatus').textContent = 'Could not detect birds: ' + error.message;
-      log('Multi-pass COCO annotation could not start: ' + error.message, 'error');
+      $('importStatus').textContent = 'Ensemble could not run: ' + error.message;
+      log('Three-model auto-annotation could not start: ' + error.message, 'error');
     } finally { button.disabled = false; }
   });
 

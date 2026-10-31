@@ -2029,7 +2029,7 @@
   // Launch the hosted Colab workflow and export the current in-browser Bird Library.
   // window.open runs synchronously inside the click gesture to avoid popup blockers.
   $('trainYoloColab').addEventListener('click', () => {
-    const notebookUrl = 'https://colab.research.google.com/github/EdebN/curly-system/blob/webgpu-yolo-training/training/WildlifeVision_YOLO_Trainer.ipynb';
+    const notebookUrl = 'https://colab.research.google.com/github/EdebN/curly-system/blob/main/training/WildlifeVision_YOLO_Trainer.ipynb';
     const notebook = window.open(notebookUrl, '_blank');
     if (!notebook) {
       $('importStatus').textContent = 'Pop-up blocked. Allow pop-ups, then click Train YOLO11 in Colab again.';

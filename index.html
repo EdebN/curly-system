@@ -148,7 +148,7 @@
         <div class="metric-card"><span class="metric-label">Duplicates skipped</span><strong id="duplicateTotal">0</strong></div>
       </div>
       <div class="card import-card">
-        <div class="card-heading"><div><p class="eyebrow">ADD PHOTOS</p><h3>Import dataset images</h3></div></div>
+        <div class="card-heading"><div><p class="eyebrow">STEP 1 · ADD PHOTOS</p><h3>Import dataset images</h3></div></div>
         <p class="muted">Import your images first. Then select images in the library and use the bulk-label control to assign their species. The bounding-box preparation and training steps follow below.</p>
         <div class="import-actions">
           <label class="button primary file-button">Import species ZIP<input id="zipPicker" type="file" accept=".zip,application/zip,application/x-zip-compressed"></label>
@@ -163,6 +163,7 @@
       </div>
       <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 2 · SPECIES LABELS</p><h3>Label images in bulk</h3></div><button id="selectModeButton" class="button secondary select-mode-button">Select images</button></div><p class="muted">Select a group of images, choose Rename, and assign the correct species label. Repeat for each species group. Labels are applied before box generation and become the YOLO class names.</p></div>
       <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 3 · PREPARE BOX SUGGESTIONS</p><h3>Train for Bounding Boxes</h3><button id="trainSpecies" class="button primary">Train for Bounding Boxes</button></div></div><p class="muted">Builds the local visual-example matcher from your labelled photos. It helps suggest a box when the generic bird detector misses one; it does not train YOLO detector weights.</p></div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 4 · GENERATE BOXES</p><h3>Auto-generate Bounding Boxes</h3></div><button id="autoAnnotate" class="button primary">Auto-generate Bounding Boxes</button></div><p class="muted">The app proposes up to two bird boxes per image. Generated boxes are marked for review and are not included in the training ZIP until verified.</p></div>
       <div class="library-toolbar">
         <input id="librarySearch" class="search-input" type="search" placeholder="Search filename or species label">
         <select id="splitFilter" class="select-input" aria-label="Filter by dataset split">
@@ -171,7 +172,6 @@
         <select id="annotationSort" class="select-input" aria-label="Sort by detection uncertainty">
           <option value="default">Default order</option><option value="uncertain">Most uncertain first · verified last</option><option value="confident">Most confident first · verified first</option><option value="unboxed">Missing boxes first</option>
         </select>
-        <button id="autoAnnotate" class="button secondary">Auto-generate Bounding Boxes</button>
       </div>
       <div id="selectionBar" class="selection-bar hidden">
         <strong id="selectionCount">0 selected</strong>

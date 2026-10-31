@@ -2,6 +2,10 @@
 
 Wildlife Vision is a browser-based wildlife observation and bird-image dataset tool, designed for iPad Safari and free hosting with GitHub Pages. It does not require a Mac or Swift Playgrounds.
 
+## Local WebGPU YOLO11 training
+
+The intended in-browser training design and acceptance criteria are documented in [docs/WEBGPU-YOLO-TRAINING.md](docs/WEBGPU-YOLO-TRAINING.md). **This is not implemented yet**: Dataset Studio currently exports YOLO annotations, while **Learn from labelled photos** builds the separate MobileNet example matcher. Do not treat that matcher as detector training.
+
 ## Run the web app
 
 Open the HTTPS GitHub Pages URL in Safari on your iPad and allow camera access. The first AI-model load requires an internet connection; model inference and image-library storage run in the browser.

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#101712">
-  <meta name="description" content="Wildlife Vision: local RF-DETR experimental inference + AI object and learned-example detection, example-based species recognition, and an image dataset library.">
+  <meta name="description" content="Wildlife Vision: local YOLO11 ONNX bird detection, live tracking, species recognition, and an image dataset library.">
   <title>Wildlife Vision</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
@@ -22,7 +22,7 @@
       <div>
         <p class="eyebrow">DETECT · LEARN · REVIEW</p>
         <h1>Find the birds.</h1>
-        <p class="lede">Experimental RF-DETR ONNX inference plus existing object detection and learned-example matching. Custom species require a model trained for those species. Motion tracking remains available as a secondary tool.</p>
+        <p class="lede">Load a trained YOLO11 ONNX model for local, multi-object bird detection. The detector recognises the 25 classes in your WildlifeVision training dataset. Motion tracking remains available as a secondary tool.</p>
       </div>
       <div class="model-note"><span class="note-icon">i</span><span><strong>AI model status</strong><br>A pretrained detector finds familiar objects; a second scan compares the frame against your labelled examples, including classes absent from the pretrained model. This is experimental visual matching, not a custom-trained detector.</span></div>
     </section>
@@ -71,12 +71,12 @@
             <button id="fullscreenToggleOutside" class="button secondary" type="button" aria-label="Enter camera fullscreen">Enter fullscreen</button>
             <button id="startCamera" class="button primary">Start camera</button><button id="captureSnapshot" class="button secondary">Save annotated frame</button>
             <button id="stopCamera" class="button secondary" disabled>Pause</button>
-            <button id="loadAI" class="button secondary">Load AI models</button><label class="button secondary file-button rf-file-button">Choose RF-DETR model (.onnx)<input id="rfModelPicker" type="file" accept=".onnx,application/octet-stream"></label><button id="loadRfDetr" class="button secondary">Load RF-DETR</button>
+            <button id="loadAI" class="button secondary">Load AI models</button><label class="button secondary file-button rf-file-button">Choose YOLO11 model (.onnx)<input id="rfModelPicker" type="file" accept=".onnx,application/octet-stream"></label><button id="loadRfDetr" class="button secondary">Load YOLO11</button>
             <button id="resetTracks" class="button secondary">Reset tracks</button>
             <button id="maskMode" class="button secondary">Draw exclusion mask</button>
           </div>
-          <div class="mode-switch card"><div><strong>Detection mode</strong><p class="helper">Stationary generic objects are hidden. Learned species matches stay visible even when still.</p></div><div class="mode-buttons"><button id="aiMode" class="button primary">AI detection</button><button id="rfMode" class="button secondary">RF-DETR</button><button id="motionMode" class="button secondary">Motion tracking</button></div></div>
-          <p id="aiStatus" class="helper" role="status">AI models not loaded. Load models to start object detection.</p><div class="rf-setup card"><div><p class="eyebrow">RF-DETR MODEL SETUP</p><strong>Load model and class names</strong><p class="helper">Choose the exported <code>.onnx</code> model above. If you have a separate class-label file, upload its <code>.json</code> here. A labels file names the model classes; it does not train the model.</p></div><div class="rf-label-row"><label class="button secondary file-button rf-file-button">Upload labels JSON<input id="rfLabelsPicker" type="file" accept=".json,application/json"></label><span id="rfLabelsName" class="helper">No labels file selected</span></div><p id="rfStatus" class="helper">RF-DETR: choose a compatible exported ONNX model. Browser inference is experimental; model preprocessing and output formats must match.</p></div>
+          <div class="mode-switch card"><div><strong>Detection mode</strong><p class="helper">Stationary generic objects are hidden. Learned species matches stay visible even when still.</p></div><div class="mode-buttons"><button id="aiMode" class="button primary">AI detection</button><button id="rfMode" class="button secondary">YOLO11 ONNX</button><button id="motionMode" class="button secondary">Motion tracking</button></div></div>
+          <p id="aiStatus" class="helper" role="status">AI models not loaded. Load models to start object detection.</p><div class="rf-setup card"><div><p class="eyebrow">YOLO11 MODEL SETUP</p><strong>Load your trained model and class names</strong><p class="helper">Choose the <code>best.onnx</code> exported from your WildlifeVision YOLO11 training run. The app includes the 25 dataset class names by default. Upload a labels <code>.json</code> only if you trained a different class list.</p></div><div class="rf-label-row"><label class="button secondary file-button rf-file-button">Upload labels JSON<input id="rfLabelsPicker" type="file" accept=".json,application/json"></label><span id="rfLabelsName" class="helper">Using built-in 25 class names</span></div><p id="rfStatus" class="helper">YOLO11: choose your trained ONNX model. Export with 640px input and NMS disabled (the app performs class-aware NMS).</p></div>
           <p id="maskHelp" class="helper hidden">Drag over the preview to mark an area to ignore. Masks are visual rectangles; draw again to add another. Use Clear masks to remove them.</p>
           <div class="zoom-row">
             <label for="zoomSlider">Zoom <strong id="zoomValue">1.0×</strong></label>

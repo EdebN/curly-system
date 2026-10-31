@@ -1678,7 +1678,7 @@
     $('exportCsv').disabled = !state.records.length;
     const exportCandidates = state.records.filter(record => recordBoxes(record).length && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
     $('exportYolo').disabled = !exportCandidates.length || !exportCandidates.every(recordIsHumanVerified);
-    $('trainYoloColab').disabled = !yoloDatasetSaved;
+    $('trainYoloColab').disabled = false;
     $('exportModel').disabled = !(state.trainingSamples.length || state.hasSavedTraining);
     $('clearLibrary').disabled = !state.records.length;
     selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
@@ -2036,7 +2036,7 @@
       log('Could not open the Colab trainer because the browser blocked the new tab.', 'warn');
       return;
     }
-    $('importStatus').textContent = 'Colab opened. Select a T4 GPU runtime, then upload the ZIP you saved from WildlifeVision.';
+    $('importStatus').textContent = 'Colab opened. Select a T4 GPU runtime, upload the reviewed dataset ZIP, and optionally upload your previous best.pt checkpoint.';
     log('Opened the Python YOLO11 trainer in Google Colab. Dataset export remains a separate step.');
   });
 

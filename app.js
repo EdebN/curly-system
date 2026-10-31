@@ -409,6 +409,7 @@
   async function runYoloDetection() {
     if (!state.rfSession || state.rfBusy || !video.videoWidth || !video.videoHeight) return;
     state.rfBusy = true;
+    const inferenceStarted = performance.now();
     try {
       const side = state.rfInputSize || 640;
       const inputCanvas = document.createElement('canvas');

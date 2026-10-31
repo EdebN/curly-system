@@ -1934,10 +1934,14 @@
         } catch (error) {
           failed++; log('COCO multi-pass annotation failed for ' + record.filename + ': ' + error.message, 'warn');
         } finally { if (url) URL.revokeObjectURL(url); image = null; }
-        if ((i + 1) % 2 === 0 || i + 1 === candidates.length) {
-          $('importStatus').textContent = 'COCO pass review ' + (i + 1) + '/' + candidates.length +
-            ' · 3 passes/image · consensus boxes ' + found + ' · existing auto-box images refreshed ' + improved +
-            ' · no consensus ' + missed + ' · errors ' + failed;
+        if ((i + 1) % 100 === 0 || i + 1 === candidates.length) {
+          // Every successful record write above is already committed to IndexedDB.
+          // This is a visible 100-image checkpoint, not a delayed batch save.
+          $('importStatus').textContent = 'Checkpoint saved · ' + (i + 1) + '/' + candidates.length +
+            ' images processed · 3 COCO passes/image · consensus boxes ' + found +
+            ' · refreshed auto-box images ' + improved + ' · no consensus ' + missed + ' · errors ' + failed;
+          log('Auto-box checkpoint: ' + (i + 1) + '/' + candidates.length +
+            ' images processed. All completed image annotations are already saved locally.');
           renderLibrary();
         }
         await new Promise(resolve => setTimeout(resolve, 0));

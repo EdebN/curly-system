@@ -1694,13 +1694,13 @@
     $('boxTotal').textContent = String(state.records.reduce((total, record) => total + (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)), 0));
     $('exportCsv').disabled = !state.records.length;
     const exportCandidates = state.records.filter(record => recordBoxes(record).length && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
-    // Keep export available when boxes still need review. The click handler asks
-    // for confirmation before including any unverified annotations.
-    $('exportYolo').disabled = !exportCandidates.length;
+    // Never grey out the export control. The click handler gives a precise
+    // explanation if the library does not yet contain usable bird annotations.
+    $('exportYolo').disabled = false;
     const unverifiedCount = exportCandidates.filter(record => !recordIsHumanVerified(record)).length;
     $('exportYolo').title = unverifiedCount
       ? unverifiedCount + ' image(s) still have boxes awaiting verification. You will be asked before exporting them.'
-      : 'All boxed images are verified and ready to export.';
+      : 'Save the current YOLO dataset ZIP.';
     $('trainYoloColab').disabled = false;
     $('exportModel').disabled = !(state.trainingSamples.length || state.hasSavedTraining);
     $('clearLibrary').disabled = !state.records.length;

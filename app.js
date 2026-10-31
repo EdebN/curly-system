@@ -1566,6 +1566,7 @@
     $('speciesTotal').textContent = String(species.size);
     $('boxTotal').textContent = String(state.records.filter((record) => record.box).length);
     $('exportCsv').disabled = !state.records.length;
+    $('exportYolo').disabled = !state.records.some(record => record.box && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
     $('exportModel').disabled = !(state.trainingSamples.length || state.hasSavedTraining);
     $('clearLibrary').disabled = !state.records.length;
     selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
@@ -1638,15 +1639,61 @@
   $('librarySearch').addEventListener('input', renderLibrary);
   $('splitFilter').addEventListener('change', renderLibrary);
 
+  let annotationDraft = null;
+  let annotationDrag = null;
+  function paintAnnotation() {
+    const canvas = $('annotationCanvas'), image = $('editPreview');
+    if (!canvas || !image.naturalWidth) return;
+    canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const box = annotationDraft;
+    if (box) {
+      ctx.strokeStyle = '#b7ef83'; ctx.lineWidth = Math.max(3, canvas.width / 300);
+      ctx.fillStyle = '#b7ef8330';
+      ctx.fillRect(box.x * canvas.width, box.y * canvas.height, box.width * canvas.width, box.height * canvas.height);
+      ctx.strokeRect(box.x * canvas.width, box.y * canvas.height, box.width * canvas.width, box.height * canvas.height);
+    }
+    $('annotationStatus').textContent = box ? 'Bird box: ' + Math.round(box.width * 100) + '% × ' + Math.round(box.height * 100) + '% of image' : 'No bounding box';
+  }
   function editRecord(id) {
     const record = state.records.find((item) => item.id === id);
     if (!record) return;
     state.editingId = id;
+    annotationDraft = record.box ? { ...record.box } : null;
     $('editPreview').src = imageURL(record);
     $('editLabel').value = record.speciesLabel;
     $('editSplit').value = record.split;
     $('editDialog').showModal();
+    if ($('editPreview').complete) paintAnnotation();
   }
+  $('editPreview').addEventListener('load', paintAnnotation);
+  $('annotationCanvas').addEventListener('pointerdown', event => {
+    const canvas = $('annotationCanvas'), rect = canvas.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    annotationDrag = { x, y };
+    annotationDraft = { x, y, width: 0, height: 0 };
+    canvas.setPointerCapture(event.pointerId); paintAnnotation();
+  });
+  $('annotationCanvas').addEventListener('pointermove', event => {
+    if (!annotationDrag) return;
+    const rect = $('annotationCanvas').getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    const y = Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height));
+    annotationDraft = { x: Math.min(annotationDrag.x, x), y: Math.min(annotationDrag.y, y), width: Math.abs(x - annotationDrag.x), height: Math.abs(y - annotationDrag.y) };
+    paintAnnotation();
+  });
+  function finishAnnotation() {
+    if (!annotationDrag) return;
+    annotationDrag = null;
+    if (annotationDraft && (annotationDraft.width < 0.01 || annotationDraft.height < 0.01)) annotationDraft = null;
+    paintAnnotation();
+  }
+  $('annotationCanvas').addEventListener('pointerup', finishAnnotation);
+  $('annotationCanvas').addEventListener('pointercancel', finishAnnotation);
+  $('clearAnnotation').addEventListener('click', () => { annotationDraft = null; paintAnnotation(); });
+
   $('editForm').addEventListener('submit', async (event) => {
     if (event.submitter && event.submitter.value !== 'save') return;
     event.preventDefault();
@@ -1654,6 +1701,7 @@
     if (!record) return;
     record.speciesLabel = $('editLabel').value.trim() || 'Unlabelled';
     record.split = $('editSplit').value;
+    record.box = annotationDraft && annotationDraft.width > 0.01 && annotationDraft.height > 0.01 ? { ...annotationDraft } : null;
     try {
       await dbRequest('readwrite', (store) => store.put(record));
       $('editDialog').close();
@@ -1679,6 +1727,63 @@
     log('Exported CSV manifest for ' + state.records.length + ' image(s).');
   }
   $('exportCsv').addEventListener('click', exportCSV);
+
+  $('exportYolo').addEventListener('click', async () => {
+    const boxed = state.records.filter(record => record.box && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
+    if (!boxed.length) { $('importStatus').textContent = 'Annotate at least one bird bounding box before exporting a YOLO dataset.'; return; }
+    if (!window.JSZip) { $('importStatus').textContent = 'ZIP library unavailable. Reload the page and try again.'; return; }
+    const classes = [...new Set(boxed.map(record => record.speciesLabel.trim()))].sort((a,b) => a.localeCompare(b));
+    const classIds = new Map(classes.map((name,index) => [name,index]));
+    const groups = new Map(classes.map(name => [name, []]));
+    boxed.forEach(record => groups.get(record.speciesLabel.trim()).push(record));
+    const splitBuckets = { train: [], val: [], test: [] };
+    groups.forEach(records => {
+      records.sort((a,b) => String(a.id).localeCompare(String(b.id)));
+      records.forEach((record,index) => {
+        let split = record.split;
+        if (!['train','validation','test'].includes(split)) {
+          const fraction = records.length <= 2 ? 0 : index / records.length;
+          split = fraction < 0.8 ? 'train' : fraction < 0.9 ? 'validation' : 'test';
+          record.split = split;
+        }
+        splitBuckets[split === 'validation' ? 'val' : split].push(record);
+      });
+    });
+    $('exportYolo').disabled = true; $('importStatus').textContent = 'Building YOLO dataset ZIP…';
+    try {
+      const zip = new JSZip();
+      const yamlNames = classes.map(name => '  - ' + JSON.stringify(name)).join('\n');
+      zip.file('dataset.yaml', 'path: .\ntrain: images/train\nval: images/val\ntest: images/test\nnc: ' + classes.length + '\nnames:\n' + yamlNames + '\n');
+      let written = 0;
+      for (const [split, records] of Object.entries(splitBuckets)) {
+        for (const record of records) {
+          const stem = String(record.id).replace(/[^a-zA-Z0-9_-]/g,'_');
+          const extension = /\.(png|webp|jpe?g)$/i.exec(record.filename);
+          const ext = extension ? extension[0].toLowerCase() : '.jpg';
+          const base = split === 'val' ? 'validation' : split;
+          zip.file('images/' + split + '/' + stem + ext, record.blob);
+          const b = record.box;
+          const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+          const line = [classIds.get(record.speciesLabel.trim()), cx, cy, b.width, b.height].join(' ');
+          zip.file('labels/' + split + '/' + stem + '.txt', line + '\n');
+          written++;
+        }
+      }
+      await Promise.all(state.records.filter(record => boxed.includes(record)).map(record => dbRequest('readwrite', store => store.put(record))));
+      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 3 } }, meta => {
+        $('importStatus').textContent = 'Building YOLO export ' + Math.round(meta.percent) + '%…';
+      });
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
+      link.href = url; link.download = 'WildlifeVision-YOLO-dataset.zip'; document.body.append(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 3000);
+      $('importStatus').textContent = 'Exported ' + written + ' annotated images across ' + classes.length + ' species. Check split counts before training.';
+      log('YOLO dataset exported: ' + written + ' images, ' + classes.length + ' classes. Unassigned records were split automatically.');
+    } catch (error) {
+      $('importStatus').textContent = 'YOLO export failed: ' + error.message;
+      log('YOLO export failed: ' + error.message, 'error');
+    } finally { $('exportYolo').disabled = false; }
+  });
+
 
   $('clearLibrary').addEventListener('click', async () => {
     if (!state.records.length || !confirm('Delete all imported images and labels from this browser? This cannot be undone. Export the CSV first if you need it.')) return;

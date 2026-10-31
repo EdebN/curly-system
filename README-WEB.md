@@ -5,7 +5,23 @@ A static HTML/CSS/JavaScript wildlife observation and bird-image dataset app for
 ## Run the trained YOLO11 detector
 
 1. Train the dataset with Ultralytics YOLO11 in Colab.
-2. Export the best checkpoint to ONNX (640px, NMS disabled).
+2. Export the best checkpoint to ONNX (640px, NMS disabled). For the Colab run named `train-2`, use:
+
+```python
+from ultralytics import YOLO
+import json
+
+model = YOLO("/content/runs/detect/train-2/weights/best.pt")
+onnx_path = model.export(format="onnx", imgsz=640, opset=17, simplify=True, nms=False)
+
+names = model.names
+names = [names[i] for i in range(len(names))]
+with open("/content/best.labels.json", "w", encoding="utf-8") as f:
+    json.dump({"names": names}, f, ensure_ascii=False, indent=2)
+
+print("ONNX:", onnx_path)
+print("Labels: /content/best.labels.json")
+```
 3. Open WildlifeVision over its GitHub Pages HTTPS address.
 4. In the Detection panel, choose the exported `.onnx` file and select **Load YOLO11**.
 5. Start the camera. The YOLO11 mode displays every retained detection with its class name, confidence and bounding box.

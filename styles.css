@@ -144,3 +144,4 @@ input[type=range],.toggle-setting input{accent-color:#a7e5bd}
 
 /* Drag-to-select dataset images. */
 .image-card.selection-mode{touch-action:none;user-select:none;-webkit-user-select:none}.image-card.selection-mode img{pointer-events:none}.image-card.selected .selection-tick{display:flex}.selection-bar{justify-content:flex-start}
+.annotation-wrap{position:relative;width:100%;max-height:62vh;display:flex;justify-content:center;background:#090b09;border:1px solid var(--line);border-radius:12px;overflow:hidden}.annotation-wrap .edit-preview{display:block;width:100%;max-height:62vh;object-fit:contain;margin:0}.annotation-wrap canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}.annotation-actions{display:flex;align-items:center;gap:12px;margin:8px 0 14px}.annotation-actions .helper{margin:0}.edit-dialog{max-width:min(760px,calc(100vw - 24px))}

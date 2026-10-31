@@ -4,7 +4,7 @@ Wildlife Vision is a browser-based wildlife observation and bird-image dataset t
 
 ## Train a custom YOLO11 detector
 
-Dataset Studio stores the images and bounding-box annotations locally. Export them from **Bird Library → Export YOLO dataset**, then use the Python trainer in [training/README.md](training/README.md).
+Dataset Studio stores the images and bounding-box annotations locally. In **Bird Library**, use **Train YOLO11 in Colab** to open the hosted Google Colab notebook and automatically export the current annotations as a dataset ZIP. Upload that ZIP into the notebook; it installs the trainer, trains YOLO11, and downloads the ONNX model and labels. You can also export manually with **Export YOLO dataset** and run the Python trainer described in [training/README.md](training/README.md).
 
 ```bash
 python -m pip install -r training/requirements.txt

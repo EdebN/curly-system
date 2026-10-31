@@ -170,6 +170,7 @@
       </div>
       <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 3 · PREPARE BOX SUGGESTIONS</p><h3>Train for Bounding Boxes</h3><button id="trainSpecies" class="button primary">Train for Bounding Boxes</button></div></div><p class="muted">Builds the local visual-example matcher from your labelled photos. It helps suggest a box when the generic bird detector misses one; it does not train YOLO detector weights.</p></div>
       <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 4 · GENERATE BOXES</p><h3>Auto-generate Bounding Boxes</h3></div><button id="autoAnnotate" class="button primary">Auto-generate Bounding Boxes</button></div><p class="muted">The app proposes up to two bird boxes per image. Generated boxes are marked for review and are not included in the training ZIP until verified.</p></div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">MODEL TRAINING · GOOGLE COLAB</p><h3>Train or update your detector</h3></div><button id="trainYoloColab" class="button primary" disabled>Train in Colab</button></div><p class="muted">This opens the training notebook. Save the reviewed dataset ZIP first. To improve an existing detector, upload its <code>best.pt</code> checkpoint in Colab as well. The notebook fine-tunes that checkpoint and exports a replacement ONNX model.</p></div>
       <div class="library-toolbar">
         <input id="librarySearch" class="search-input" type="search" placeholder="Search filename or species label">
         <select id="splitFilter" class="select-input" aria-label="Filter by dataset split">
@@ -180,7 +181,7 @@
         </select>
       </div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
-      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Check boxes, then save the dataset ZIP</h3></div><button id="exportYolo" class="button secondary" disabled>Save YOLO dataset ZIP</button></div><p class="muted">Open each image with Edit, correct the boxes, and mark the annotations verified. Check images containing multiple birds individually. Export only after reviewing the generated boxes.</p><div class="card-heading"><div><p class="eyebrow">STEP 6 · MODEL TRAINING</p><h3>Train in Google Colab</h3></div><button id="trainYoloColab" class="button primary" disabled>Train in Colab</button></div><p class="muted">After saving the ZIP, open the Colab notebook, select a T4 GPU runtime, upload the ZIP, and run the training cell.</p></div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Check boxes, then save the dataset ZIP</h3></div><button id="exportYolo" class="button secondary" disabled>Save YOLO dataset ZIP</button></div><p class="muted">Open each image with Edit, correct the boxes, and mark the annotations verified. Check images containing multiple birds individually. Export only after reviewing the generated boxes.</p></div>
     </section>
 
     <section id="diagnosticsPanel" class="panel">

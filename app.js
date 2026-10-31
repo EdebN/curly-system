@@ -1515,7 +1515,7 @@
     return record.box ? [{ box: record.box, confidence: record.boxConfidence ?? 1, source: record.boxSource || 'legacy', review: record.boxReview || 'pending' }] : [];
   }
   function isHumanVerifiedBox(item) {
-    return item.source === 'manual' || item.review === 'verified' || item.review === 'reviewed';
+    return item.source === 'manual' || item.review === 'verified';
   }
   function recordIsHumanVerified(record) {
     const boxes = recordBoxes(record);
@@ -1829,7 +1829,7 @@
       ctx.fillText(String(index + 1), x + 5, Math.max(20, y - 6));
     });
     const uncertainties = boxes.map(item => {
-      const confidence = item.source === 'manual' ? 1.01 : (item.confidence ?? 1);
+      const confidence = isHumanVerifiedBox(item) ? 1.01 : (item.confidence ?? 1);
       return Math.max(0, Math.min(100, (1 - confidence) * 100));
     });
     const uncertainty = uncertainties.length

@@ -464,12 +464,29 @@
         if (Math.max(Math.abs(cx), Math.abs(cy), Math.abs(width), Math.abs(height)) <= 2) {
           cx *= side; cy *= side; width *= side; height *= side;
         }
-        const left = Math.max(0, Math.min(video.videoWidth, (cx - width / 2 - offX) / scale));
-        const top = Math.max(0, Math.min(video.videoHeight, (cy - height / 2 - offY) / scale));
-        const right = Math.max(0, Math.min(video.videoWidth, (cx + width / 2 - offX) / scale));
-        const bottom = Math.max(0, Math.min(video.videoHeight, (cy + height / 2 - offY) / scale));
+        // Reject predictions whose centre falls in the grey letterbox padding.
+        // These are common sources of edge-of-input hallucinations.
+        const inputLeft = cx - width / 2, inputTop = cy - height / 2;
+        const inputRight = cx + width / 2, inputBottom = cy + height / 2;
+        if (cx < offX || cx > offX + drawW || cy < offY || cy > offY + drawH) continue;
+        const rawLeft = (inputLeft - offX) / scale;
+        const rawTop = (inputTop - offY) / scale;
+        const rawRight = (inputRight - offX) / scale;
+        const rawBottom = (inputBottom - offY) / scale;
+        const left = Math.max(0, Math.min(video.videoWidth, rawLeft));
+        const top = Math.max(0, Math.min(video.videoHeight, rawTop));
+        const right = Math.max(0, Math.min(video.videoWidth, rawRight));
+        const bottom = Math.max(0, Math.min(video.videoHeight, rawBottom));
         const w = right - left, h = bottom - top;
-        if (w < 2 || h < 2 || isMasked((left + w / 2) / video.videoWidth, (top + h / 2) / video.videoHeight)) continue;
+        if (w < 5 || h < 5 || isMasked((left + w / 2) / video.videoWidth, (top + h / 2) / video.videoHeight)) continue;
+        // A box cut off by the actual camera frame is less trustworthy than
+        // an otherwise identical box fully inside the image.
+        const edgeMarginX = video.videoWidth * 0.012;
+        const edgeMarginY = video.videoHeight * 0.012;
+        const touchesFrameEdge = left <= edgeMarginX || top <= edgeMarginY ||
+          right >= video.videoWidth - edgeMarginX || bottom >= video.videoHeight - edgeMarginY;
+        const requiredScore = state.aiThreshold + (touchesFrameEdge ? 0.15 : 0);
+        if (score < Math.min(0.95, requiredScore)) continue;
         const label = state.rfLabels[classId] || ('class_' + classId);
         candidates.push({
           prediction: { bbox: [left, top, w, h], score, class: label, customDetector: true },
@@ -2041,13 +2058,18 @@
   });
 
   $('exportYolo').addEventListener('click', async () => {
-    const boxed = state.records.filter(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
-    if (!boxed.length) { $('importStatus').textContent = 'Generate or draw and review bird bounding boxes before saving the YOLO dataset ZIP.'; return; }
+    const negativeLabels = new Set(['background', 'no bird', 'no birds', 'negative', 'empty scene']);
+    const hasBoxes = record => Array.isArray(record.boxes) ? record.boxes.length > 0 : !!record.box;
+    const labelled = state.records.filter(record => record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
+    const boxed = labelled.filter(record => hasBoxes(record));
+    const backgrounds = labelled.filter(record => !hasBoxes(record) && negativeLabels.has(record.speciesLabel.trim().toLowerCase()));
+    if (!boxed.length) { $('importStatus').textContent = 'Add reviewed bird boxes first. You can also label clear non-bird photos as Background to teach the detector what to ignore.'; return; }
     if (!window.JSZip) { $('importStatus').textContent = 'ZIP library unavailable. Reload the page and try again.'; return; }
     const classes = [...new Set(boxed.map(record => record.speciesLabel.trim()))].sort((a,b) => a.localeCompare(b));
     const classIds = new Map(classes.map((name,index) => [name,index]));
     const groups = new Map(classes.map(name => [name, []]));
     boxed.forEach(record => groups.get(record.speciesLabel.trim()).push(record));
+    if (backgrounds.length) groups.set('__background__', backgrounds);
     const splitBuckets = { train: [], val: [], test: [] };
     groups.forEach(records => {
       records.sort((a,b) => String(a.id).localeCompare(String(b.id)));
@@ -2107,8 +2129,8 @@
       link.href = url; link.download = 'WildlifeVision-YOLO-dataset.zip'; document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 3000);
       yoloDatasetSaved = true;
-      $('importStatus').textContent = 'Saved ' + written + ' reviewed images across ' + classes.length + ' species. The ZIP is ready for Colab.';
-      log('Reviewed YOLO dataset ZIP saved: ' + written + ' images, ' + classes.length + ' classes.');
+      $('importStatus').textContent = 'Saved ' + written + ' images (' + backgrounds.length + ' labelled background examples) across ' + classes.length + ' species. The ZIP is ready for Colab.';
+      log('Reviewed YOLO dataset ZIP saved: ' + written + ' images, including ' + backgrounds.length + ' background examples, across ' + classes.length + ' classes.');
       renderLibrary();
     } catch (error) {
       $('importStatus').textContent = 'YOLO export failed: ' + error.message;

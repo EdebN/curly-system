@@ -1675,6 +1675,7 @@
     $('boxTotal').textContent = String(state.records.reduce((total, record) => total + (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)), 0));
     $('exportCsv').disabled = !state.records.length;
     $('exportYolo').disabled = !state.records.some(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
+    $('trainYoloColab').disabled = $('exportYolo').disabled;
     $('exportModel').disabled = !(state.trainingSamples.length || state.hasSavedTraining);
     $('clearLibrary').disabled = !state.records.length;
     selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
@@ -2018,6 +2019,21 @@
     log('Exported CSV manifest for ' + state.records.length + ' image(s).');
   }
   $('exportCsv').addEventListener('click', exportCSV);
+
+  // Launch the hosted Colab workflow and export the current in-browser Bird Library.
+  // window.open runs synchronously inside the click gesture to avoid popup blockers.
+  $('trainYoloColab').addEventListener('click', () => {
+    const notebookUrl = 'https://colab.research.google.com/github/EdebN/curly-system/blob/webgpu-yolo-training/training/WildlifeVision_YOLO_Trainer.ipynb';
+    const notebook = window.open(notebookUrl, '_blank');
+    if (!notebook) {
+      $('importStatus').textContent = 'Pop-up blocked. Allow pop-ups, then click Train YOLO11 in Colab again.';
+      log('Could not open the Colab trainer because the browser blocked the new tab.', 'warn');
+      return;
+    }
+    $('importStatus').textContent = 'Colab opened. Exporting your Bird Library dataset ZIP now; upload that ZIP in the notebook.';
+    log('Opened the Python YOLO11 trainer in Google Colab; exporting the current Bird Library dataset.');
+    $('exportYolo').click();
+  });
 
   $('exportYolo').addEventListener('click', async () => {
     const boxed = state.records.filter(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));

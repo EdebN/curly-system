@@ -680,7 +680,7 @@
       $('classifierCapability').textContent = state.trainingReady ? labels.size + ' species learned' : 'Not trained';
       $('classifierCapability').className = state.trainingReady ? 'good' : 'warn';
       $('importStatus').textContent = 'Model updated: ' + state.trainingSamples.length + ' total examples across ' + labels.size + ' species · ' + failed + ' skipped. Progress is saved locally.';
-      $('trainSpecies').textContent = 'Add new photos to model';
+      $('trainSpecies').textContent = 'Train for Bounding Boxes';
       log('Incremental learning complete: ' + state.trainingSamples.length + ' total examples across ' + labels.size + ' species.');
     } catch (error) {
       $('importStatus').textContent = 'Learning paused. Existing model retained; progress was checkpointed where possible. Error: ' + error.message;
@@ -1675,7 +1675,7 @@
     $('boxTotal').textContent = String(state.records.reduce((total, record) => total + (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)), 0));
     $('exportCsv').disabled = !state.records.length;
     $('exportYolo').disabled = !state.records.some(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
-    $('trainYoloColab').disabled = $('exportYolo').disabled;
+    $('trainYoloColab').disabled = !state.records.length;
     $('exportModel').disabled = !(state.trainingSamples.length || state.hasSavedTraining);
     $('clearLibrary').disabled = !state.records.length;
     selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
@@ -2030,14 +2030,13 @@
       log('Could not open the Colab trainer because the browser blocked the new tab.', 'warn');
       return;
     }
-    $('importStatus').textContent = 'Colab opened. Exporting your Bird Library dataset ZIP now; upload that ZIP in the notebook.';
-    log('Opened the Python YOLO11 trainer in Google Colab; exporting the current Bird Library dataset.');
-    $('exportYolo').click();
+    $('importStatus').textContent = 'Colab opened. Select a T4 GPU runtime, then upload the ZIP you saved from WildlifeVision.';
+    log('Opened the Python YOLO11 trainer in Google Colab. Dataset export remains a separate step.');
   });
 
   $('exportYolo').addEventListener('click', async () => {
     const boxed = state.records.filter(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
-    if (!boxed.length) { $('importStatus').textContent = 'Annotate at least one bird bounding box before exporting a YOLO dataset.'; return; }
+    if (!boxed.length) { $('importStatus').textContent = 'Generate or draw and review bird bounding boxes before saving the YOLO dataset ZIP.'; return; }
     if (!window.JSZip) { $('importStatus').textContent = 'ZIP library unavailable. Reload the page and try again.'; return; }
     const classes = [...new Set(boxed.map(record => record.speciesLabel.trim()))].sort((a,b) => a.localeCompare(b));
     const classIds = new Map(classes.map((name,index) => [name,index]));

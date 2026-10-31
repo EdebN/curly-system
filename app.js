@@ -1500,6 +1500,7 @@
     const files = Array.from(fileList || []).map((item) => item && item.file ? item : ({ file: item, relativePath: item.webkitRelativePath || item.name }))
       .filter((item) => item.file && isImageFile(item.file, item.relativePath));
     if (!files.length) { $('importStatus').textContent = 'No supported images found. Try a ZIP containing your species folders.'; return; }
+    yoloDatasetSaved = false;
     let imported = 0, duplicates = 0, failed = 0;
     $('importStatus').textContent = 'Importing ' + files.length + ' image(s)…';
     log('Import started for ' + files.length + ' image(s).');
@@ -2121,6 +2122,7 @@
       await dbRequest('readwrite', (store) => store.clear());
       state.objectURLs.forEach((url) => URL.revokeObjectURL(url));
       state.objectURLs.clear(); state.records = []; state.duplicateCount = 0;
+      yoloDatasetSaved = false;
       $('duplicateTotal').textContent = '0';
       $('importStatus').textContent = 'Library cleared.';
       renderLibrary(); log('Dataset library cleared by user.', 'warn');

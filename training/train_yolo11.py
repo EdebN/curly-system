@@ -11,6 +11,7 @@ labels/{train,val,test}, in standard Ultralytics YOLO detection format.
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import tempfile
 import zipfile
@@ -99,10 +100,18 @@ def main() -> None:
 
     trained = YOLO(str(best))
     trained.val(data=str(resolved_yaml), imgsz=args.imgsz, device=args.device)
-    onnx_path = trained.export(format="onnx", imgsz=args.imgsz, opset=17, simplify=True)
+    onnx_path = Path(trained.export(format="onnx", imgsz=args.imgsz, opset=17, simplify=True, nms=False))
+    names = trained.names
+    if isinstance(names, dict):
+        class_names = [names[index] for index in sorted(names, key=lambda value: int(value))]
+    else:
+        class_names = list(names)
+    labels_path = onnx_path.with_suffix(".labels.json")
+    labels_path.write_text(json.dumps({"names": class_names}, ensure_ascii=False, indent=2), encoding="utf-8")
     print("\nTraining complete.")
     print(f"Best PyTorch weights: {best}")
     print(f"ONNX export: {onnx_path}")
+    print(f"Class labels: {labels_path}")
     print("Keep the dataset YAML and class order with the model. Review predictions on unseen photos before trusting it.")
 
 

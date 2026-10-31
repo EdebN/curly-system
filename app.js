@@ -680,7 +680,7 @@
       $('classifierCapability').textContent = state.trainingReady ? labels.size + ' species learned' : 'Not trained';
       $('classifierCapability').className = state.trainingReady ? 'good' : 'warn';
       $('importStatus').textContent = 'Model updated: ' + state.trainingSamples.length + ' total examples across ' + labels.size + ' species · ' + failed + ' skipped. Progress is saved locally.';
-      $('trainSpecies').textContent = 'Add new photos to model';
+      $('trainSpecies').textContent = 'Train for Bounding Boxes';
       log('Incremental learning complete: ' + state.trainingSamples.length + ' total examples across ' + labels.size + ' species.');
     } catch (error) {
       $('importStatus').textContent = 'Learning paused. Existing model retained; progress was checkpointed where possible. Error: ' + error.message;
@@ -1500,6 +1500,7 @@
     const files = Array.from(fileList || []).map((item) => item && item.file ? item : ({ file: item, relativePath: item.webkitRelativePath || item.name }))
       .filter((item) => item.file && isImageFile(item.file, item.relativePath));
     if (!files.length) { $('importStatus').textContent = 'No supported images found. Try a ZIP containing your species folders.'; return; }
+    yoloDatasetSaved = false;
     let imported = 0, duplicates = 0, failed = 0;
     $('importStatus').textContent = 'Importing ' + files.length + ' image(s)…';
     log('Import started for ' + files.length + ' image(s).');
@@ -1588,6 +1589,7 @@
   }
   const selectedRecords = new Set();
   let selectionMode = false;
+  let yoloDatasetSaved = false;
   function recordBoxes(record) {
     if (Array.isArray(record.boxes)) return record.boxes;
     return record.box ? [{ box: record.box, confidence: record.boxConfidence ?? 1, source: record.boxSource || 'legacy', review: record.boxReview || 'pending' }] : [];
@@ -1674,8 +1676,9 @@
     $('speciesTotal').textContent = String(species.size);
     $('boxTotal').textContent = String(state.records.reduce((total, record) => total + (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)), 0));
     $('exportCsv').disabled = !state.records.length;
-    $('exportYolo').disabled = !state.records.some(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
-    $('trainYoloColab').disabled = $('exportYolo').disabled;
+    const exportCandidates = state.records.filter(record => recordBoxes(record).length && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
+    $('exportYolo').disabled = !exportCandidates.length || !exportCandidates.every(recordIsHumanVerified);
+    $('trainYoloColab').disabled = !yoloDatasetSaved;
     $('exportModel').disabled = !(state.trainingSamples.length || state.hasSavedTraining);
     $('clearLibrary').disabled = !state.records.length;
     selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
@@ -1732,6 +1735,7 @@
     const label = $('bulkLabelInput').value.trim();
     if (!label || !selectedRecords.size) return;
     const records = state.records.filter((record) => selectedRecords.has(record.id));
+    yoloDatasetSaved = false;
     const button = $('saveBulkLabelButton'); button.disabled = true; button.textContent = 'Saving…';
     try {
       for (const record of records) {
@@ -1804,6 +1808,7 @@
     const candidates = state.records.filter(record => boxCount(record) < 2);
     if (!candidates.length) { $('importStatus').textContent = 'Every image already has two boxes. Edit records to review them.'; return; }
     const button = $('autoAnnotate'); button.disabled = true;
+    yoloDatasetSaved = false;
     try {
       if (!state.detectorModel || !state.featureModel) await loadAIModels();
       if (!state.detectorModel) throw new Error('COCO-SSD detector did not load.');
@@ -1980,6 +1985,7 @@
     if (!record) return;
     record.speciesLabel = $('editLabel').value.trim() || 'Unlabelled';
     record.split = $('editSplit').value;
+    yoloDatasetSaved = false;
     record.boxes = annotationDraft.map(item => ({
       box: { ...item.box },
       confidence: isHumanVerifiedBox(item) ? 1.01 : (item.confidence ?? 1),
@@ -2030,14 +2036,13 @@
       log('Could not open the Colab trainer because the browser blocked the new tab.', 'warn');
       return;
     }
-    $('importStatus').textContent = 'Colab opened. Exporting your Bird Library dataset ZIP now; upload that ZIP in the notebook.';
-    log('Opened the Python YOLO11 trainer in Google Colab; exporting the current Bird Library dataset.');
-    $('exportYolo').click();
+    $('importStatus').textContent = 'Colab opened. Select a T4 GPU runtime, then upload the ZIP you saved from WildlifeVision.';
+    log('Opened the Python YOLO11 trainer in Google Colab. Dataset export remains a separate step.');
   });
 
   $('exportYolo').addEventListener('click', async () => {
     const boxed = state.records.filter(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
-    if (!boxed.length) { $('importStatus').textContent = 'Annotate at least one bird bounding box before exporting a YOLO dataset.'; return; }
+    if (!boxed.length) { $('importStatus').textContent = 'Generate or draw and review bird bounding boxes before saving the YOLO dataset ZIP.'; return; }
     if (!window.JSZip) { $('importStatus').textContent = 'ZIP library unavailable. Reload the page and try again.'; return; }
     const classes = [...new Set(boxed.map(record => record.speciesLabel.trim()))].sort((a,b) => a.localeCompare(b));
     const classIds = new Map(classes.map((name,index) => [name,index]));
@@ -2101,8 +2106,10 @@
       const url = URL.createObjectURL(blob), link = document.createElement('a');
       link.href = url; link.download = 'WildlifeVision-YOLO-dataset.zip'; document.body.append(link); link.click(); link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 3000);
-      $('importStatus').textContent = 'Exported ' + written + ' annotated images across ' + classes.length + ' species. Check split counts before training.';
-      log('YOLO dataset exported: ' + written + ' images, ' + classes.length + ' classes. Unassigned records were split automatically.');
+      yoloDatasetSaved = true;
+      $('importStatus').textContent = 'Saved ' + written + ' reviewed images across ' + classes.length + ' species. The ZIP is ready for Colab.';
+      log('Reviewed YOLO dataset ZIP saved: ' + written + ' images, ' + classes.length + ' classes.');
+      renderLibrary();
     } catch (error) {
       $('importStatus').textContent = 'YOLO export failed: ' + error.message;
       log('YOLO export failed: ' + error.message, 'error');    } finally { $('exportYolo').disabled = false; }
@@ -2115,6 +2122,7 @@
       await dbRequest('readwrite', (store) => store.clear());
       state.objectURLs.forEach((url) => URL.revokeObjectURL(url));
       state.objectURLs.clear(); state.records = []; state.duplicateCount = 0;
+      yoloDatasetSaved = false;
       $('duplicateTotal').textContent = '0';
       $('importStatus').textContent = 'Library cleared.';
       renderLibrary(); log('Dataset library cleared by user.', 'warn');

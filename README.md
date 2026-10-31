@@ -4,14 +4,21 @@ Wildlife Vision is a browser-based wildlife observation and bird-image dataset t
 
 ## Train a custom YOLO11 detector
 
-Dataset Studio stores the images and bounding-box annotations locally. In **Bird Library**, use **Train YOLO11 in Colab** to open the hosted Google Colab notebook and automatically export the current annotations as a dataset ZIP. Upload that ZIP into the notebook; it installs the trainer, trains YOLO11, and downloads the ONNX model and labels. You can also export manually with **Export YOLO dataset** and run the Python trainer described in [training/README.md](training/README.md).
+Follow this order:
 
-```bash
-python -m pip install -r training/requirements.txt
-python training/train_yolo.py WildlifeVision-YOLO-dataset.zip --epochs 100 --imgsz 640
-```
+1. Import images into **Bird Library**.
+2. Bulk-label the images with their species.
+3. Press **Train for Bounding Boxes** to prepare the local visual-example matcher used for box suggestions.
+4. Press **Auto-generate Bounding Boxes**.
+5. Review and correct the boxes in each image. Keep multiple birds as separate boxes.
+6. Press **Save YOLO dataset ZIP**.
+7. Press **Train in Colab**.
+8. In Colab, select **Runtime → Change runtime type → T4 GPU**.
+9. Upload the ZIP saved in step 6.
+10. Run the cell that displays the **Train YOLO11** button, then click it.
+11. Download best.onnx, best.labels.json, and best.pt.
 
-The trainer uses the official Ultralytics Python package, fine-tunes `yolo11n.pt`, and exports `best.onnx` plus `best.labels.json`. Upload both files in WildlifeVision's Live camera panel. Multiple annotated birds in one image are retained as separate bounding boxes.
+The ZIP transfers the reviewed images and annotations from browser IndexedDB to Colab. The browser cannot expose its private local database directly to Google's remote runtime. See [training/README.md](training/README.md) for details and local training instructions.
 
 ## Run the web app
 

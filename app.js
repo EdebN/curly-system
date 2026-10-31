@@ -497,8 +497,7 @@
       format: 'wildlifevision-species-matcher',
       version: 1,
       featureModel: 'MobileNetV2-alpha1',
-      featureDescription: 'MobileNetV2 alpha=1.0 spatially pooled feature vectors; example-based cosine similarity matcher.',
-      createdAt: new Date().toISOString(),
+      featureDescription: 'MobileNetV2 alpha=1.0 spatially pooled feature vectors; example-based cosine similarity matcher.',      createdAt: new Date().toISOString(),
       exampleCount: state.trainingSamples.length,
       species: labels,
       samples: state.trainingSamples.map(sample => ({
@@ -997,7 +996,6 @@
     const union = a.w * a.h + b.w * b.h - intersection;
     return union > 0 ? intersection / union : 0;
   }
-
   function updateTracks(regions) {
     state.tracks.forEach((track) => { track.missed++; });
     const used = new Set();
@@ -1497,8 +1495,7 @@
   });
   $('folderPicker').addEventListener('change', async (event) => {
     await importFiles(event.target.files, true); event.target.value = '';
-  });
-  $('zipPicker').addEventListener('change', async (event) => {
+  });  $('zipPicker').addEventListener('change', async (event) => {
     const file = event.target.files && event.target.files[0];
     if (file) await importZip(file);
     event.target.value = '';
@@ -1974,7 +1971,21 @@
           const extension = /\.(png|webp|jpe?g)$/i.exec(record.filename);
           const ext = extension ? extension[0].toLowerCase() : '.jpg';
           const base = split === 'val' ? 'validation' : split;
-          zip.file('images/' + split + '/' + stem + ext, record.blob);
+          // Convert each stored image to plain binary data before giving it to JSZip.
+          // Safari can fail while JSZip's Blob worker reads File-backed IndexedDB values.
+          if (!record.blob || typeof record.blob.arrayBuffer !== 'function') {
+            throw new Error('Image data is missing or unreadable for "' + (record.filename || stem) + '". Re-import that image before exporting.');
+          }
+          let imageBytes;
+          try {
+            imageBytes = new Uint8Array(await record.blob.arrayBuffer());
+          } catch (imageError) {
+            throw new Error('Could not read "' + (record.filename || stem) + '": ' + imageError.message);
+          }
+          if (!imageBytes.byteLength) {
+            throw new Error('Image "' + (record.filename || stem) + '" is empty. Re-import it before exporting.');
+          }
+          zip.file('images/' + split + '/' + stem + ext, imageBytes);
           const boxes = Array.isArray(record.boxes) && record.boxes.length ? record.boxes.map(item => item.box) : (record.box ? [record.box] : []);
           const lines = boxes.map(b => {
             const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
@@ -1997,8 +2008,7 @@
       log('YOLO dataset exported: ' + written + ' images, ' + classes.length + ' classes. Unassigned records were split automatically.');
     } catch (error) {
       $('importStatus').textContent = 'YOLO export failed: ' + error.message;
-      log('YOLO export failed: ' + error.message, 'error');
-    } finally { $('exportYolo').disabled = false; }
+      log('YOLO export failed: ' + error.message, 'error');    } finally { $('exportYolo').disabled = false; }
   });
 
 

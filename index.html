@@ -166,6 +166,10 @@
         <select id="splitFilter" class="select-input" aria-label="Filter by dataset split">
           <option value="all">All splits</option><option value="unassigned">Unassigned</option><option value="train">Train</option><option value="validation">Validation</option><option value="test">Test</option>
         </select>
+        <select id="annotationSort" class="select-input" aria-label="Sort by detection uncertainty">
+          <option value="default">Default order</option><option value="uncertain">Most uncertain first</option><option value="confident">Most confident first</option><option value="unboxed">Missing boxes first</option>
+        </select>
+        <button id="autoAnnotate" class="button secondary">Auto-detect boxes</button>
         <button id="selectModeButton" class="button secondary select-mode-button">Select</button>
       </div>
       <div id="selectionBar" class="selection-bar hidden">

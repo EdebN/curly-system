@@ -1801,7 +1801,16 @@
       ctx.font = 'bold ' + Math.max(18, canvas.width / 35) + 'px sans-serif';
       ctx.fillText(String(index + 1), x + 5, Math.max(20, y - 6));
     });
-    $('annotationStatus').textContent = boxes.length + ' bird boxes · draw to add another';
+    const uncertainties = boxes.map(item => {
+      const confidence = item.source === 'manual' ? 1.01 : (item.confidence ?? 1);
+      return Math.max(0, Math.min(100, (1 - confidence) * 100));
+    });
+    const uncertainty = uncertainties.length
+      ? uncertainties.reduce((sum, value) => sum + value, 0) / uncertainties.length
+      : null;
+    $('annotationStatus').textContent = uncertainty === null
+      ? 'Uncertainty: —'
+      : 'Average uncertainty: ' + (uncertainty < 1 ? uncertainty.toFixed(1) : Math.round(uncertainty)) + '%';
     $('clearAnnotation').disabled = boxes.length === 0;
     $('removeLastAnnotation').disabled = boxes.length === 0;
   }

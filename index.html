@@ -180,8 +180,8 @@
           <option value="default">Default order</option><option value="uncertain">Most uncertain first · verified last</option><option value="confident">Most confident first · verified first</option><option value="unboxed">Missing boxes first</option>
         </select>
       </div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Review annotations and export dataset</h3><button id="exportYolo" class="button primary">Save YOLO dataset ZIP</button></div></div><p class="muted">Correct the bird boxes and mark them verified where possible. You can export before every image is verified; the app will warn you about unchecked boxes. Keep every photo uncropped. Label bird-free scenes exactly <strong>Background</strong> and clear all boxes. Background photos are exported with empty label files, not as a species class.</p></div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
-      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Check boxes, then save the dataset ZIP</h3></div><button id="exportYolo" class="button secondary" disabled>Save YOLO dataset ZIP</button></div><p class="muted">Open each image with Edit, correct the boxes, and mark the annotations verified. Check images containing multiple birds individually. Keep every photo uncropped. Bulk-label bird-free scenes exactly <strong>Background</strong>, then open each one with Edit and use Clear all so it has zero boxes. The original full image is exported with an empty YOLO label file; Background is never a species class.</p></div>
     </section>
 
     <section id="diagnosticsPanel" class="panel">

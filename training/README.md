@@ -27,11 +27,13 @@ The ZIP is the transfer format between the browser's private IndexedDB library a
 
 The ZIP contains:
 
-- images/train, images/val, and images/test
+- Original, full, uncropped image files in images/train, images/val, and images/test
 - Matching YOLO text files in labels/
-- dataset.yaml with species/class names
+- dataset.yaml with bird species/class names
 
-Every bounding box is exported as its own YOLO label row. An image containing three birds therefore contributes three boxes, including when the birds share a species label.
+The exporter copies each stored image's original bytes directly. It does not crop, resize, or recompress images. The surrounding scene is useful training context.
+
+Every bounding box is exported as its own YOLO label row. An image containing three birds therefore contributes three boxes, including when the birds share a species label. A bird-free Background image is exported with an empty label file and is not added to the species list. Background-labelled images that still have boxes are skipped as negatives until those boxes are cleared.
 
 ## Run locally instead
 
@@ -87,7 +89,7 @@ The ONNX export uses a 640 × 640 input by default, raw YOLO output, and NMS dis
 
 ## Reducing false-positive bird detections
 
-The dataset exporter supports explicit negative/background images. Import clear photos that contain no birds and bulk-label them exactly **Background** (or use **No bird**, **No birds**, **Negative**, or **Empty scene**). Leave their bounding-box list empty. They are exported as images with empty YOLO label files, not as an extra species class.
+The dataset exporter supports explicit negative/background images. Import clear photos that contain no birds and bulk-label them exactly **Background** (or use **No bird**, **No birds**, **Negative**, or **Empty scene**). Keep the complete original photo: do not crop it to a subject or remove the surroundings. Clear every bounding box from these images. They are exported unchanged, with empty YOLO label files, and are not added as an extra species class. If a Background-labelled image still has boxes, the exporter skips it as a negative and reports how many need clearing.
 
 Include varied backgrounds and confusing non-bird objects, especially examples from the camera locations where false detections occur. Do not label an image as Background if it contains a bird. Keep the existing labelled bird images in the same dataset so the model learns both positive and negative examples.
 

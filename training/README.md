@@ -1,76 +1,58 @@
 # Train WildlifeVision with Python
 
-This is the actual YOLO11 training path. Dataset Studio remains the source of images and annotations; Python/Ultralytics performs detector training and exports the ONNX model used by the browser app.
+This is the YOLO11 training path. WildlifeVision prepares the image dataset and annotations in the browser; Python/Ultralytics trains the detector and exports the ONNX model used by the browser app.
 
-## Quick path: Google Colab
+## Exact workflow
 
-1. Open WildlifeVision → Bird Library.
-2. Click **Train YOLO11 in Colab**. The app opens the Colab notebook and starts exporting the current in-browser dataset.
-3. In the notebook, upload the downloaded `WildlifeVision-YOLO-dataset.zip` when prompted.
-4. Run the training section's code cell once to display the **Train YOLO11** button, then click that button. It starts training and ONNX export and streams the log below it.
-5. After training completes, run the download cell to download `best.onnx`, `best.labels.json`, and `best.pt`.
-5. Back in WildlifeVision → Live camera, choose the ONNX file, upload the labels JSON, and load YOLO11.
+### In WildlifeVision
 
-The ZIP is the transfer format between the browser's private IndexedDB library and the separate Colab runtime. The app cannot directly expose its local browser database to Google's remote Python runtime.
+1. Import images into **Bird Library**.
+2. Select images in bulk and assign their species labels.
+3. Press **Train for Bounding Boxes**. This builds the local visual-example matcher used to help propose boxes when the generic detector misses a bird. It does not train YOLO detector weights.
+4. Press **Auto-generate Bounding Boxes**.
+5. Review every image. Open **Edit**, correct the boxes, and mark the annotations verified. Keep separate boxes for separate birds, including birds of the same species.
+6. Press **Save YOLO dataset ZIP**.
 
-## 1. Export from Bird Library
+### In Google Colab
 
-Open **Bird Library → Export YOLO dataset**. This downloads `WildlifeVision-YOLO-dataset.zip` containing:
+7. Press **Train in Colab** in Bird Library to open the notebook.
+8. Select **Runtime → Change runtime type → T4 GPU**.
+9. Upload the WildlifeVision-YOLO-dataset.zip saved in step 6.
+10. Run the cell that displays **Train YOLO11**, then click the button.
+11. When training and ONNX export finish, run the download cell. Save best.onnx, best.labels.json, and best.pt.
 
-- `images/train`, `images/val`, and `images/test`
-- Matching YOLO text files in `labels/`
-- `dataset.yaml` with the species/class names
+The ZIP is the transfer format between the browser's private IndexedDB library and the separate Colab runtime. Colab cannot directly read the browser's local database.
+
+## Dataset contents
+
+The ZIP contains:
+
+- images/train, images/val, and images/test
+- Matching YOLO text files in labels/
+- dataset.yaml with species/class names
 
 Every bounding box is exported as its own YOLO label row. An image containing three birds therefore contributes three boxes, including when the birds share a species label.
 
-Review the annotations and train/validation split before training. The trainer validates class IDs and box coordinates and stops if the required train or validation split has no labelled boxes.
+## Run locally instead
 
-## 2. Install Python dependencies
-
-Python 3.10–3.12 is recommended for broad PyTorch wheel compatibility. Use a virtual environment:
+Install dependencies:
 
 ```bash
 python -m venv .venv
-# macOS / Linux:
 source .venv/bin/activate
-# Windows:
-# .venv\Scripts\activate
-
 python -m pip install --upgrade pip
 python -m pip install -r training/requirements.txt
 ```
 
-Install a PyTorch build appropriate for your machine if the default dependency resolver does not select the right accelerator build. NVIDIA CUDA is recommended for faster training. CPU and Apple MPS may work but can be substantially slower.
-
-## 3. Train and export
-
-From the repository root:
+Then train from the exported ZIP:
 
 ```bash
 python training/train_yolo.py WildlifeVision-YOLO-dataset.zip --epochs 100 --imgsz 640
 ```
 
-The script also accepts an already-extracted dataset folder:
+The script also accepts an extracted dataset directory. Useful options include --model, --epochs, --imgsz, --batch, --device, --workers, --output, --name, and --patience.
 
-```bash
-python training/train_yolo.py ./my-bird-dataset --epochs 100
-```
-
-Useful options:
-
-| Option | Default | Purpose |
-|---|---:|---|
-| `--model` | `yolo11n.pt` | Starting Ultralytics checkpoint |
-| `--epochs` | `100` | Maximum training epochs |
-| `--imgsz` | `640` | Training and export image size |
-| `--batch` | `-1` | Let Ultralytics estimate batch size |
-| `--device` | automatic | Set `0`, `cpu`, or `mps` |
-| `--workers` | `2` | Data-loader workers |
-| `--output` | `wildlifevision-training` | Output directory |
-| `--name` | `bird-detector` | Run name |
-| `--patience` | `25` | Early-stopping patience |
-
-## 4. Load the model in WildlifeVision
+## Load the model in WildlifeVision
 
 The output is written under:
 
@@ -83,17 +65,6 @@ wildlifevision-training/
     wildlifevision-model.json
 ```
 
-In WildlifeVision:
+In WildlifeVision, open **Live camera**, choose best.onnx, upload best.labels.json, and select **Load YOLO11**.
 
-1. Open **Live camera**.
-2. Choose `best.onnx` using **Choose YOLO11 model (.onnx)**.
-3. Choose **Upload labels JSON** and select `best.labels.json`.
-4. Select **Load YOLO11**.
-
-The ONNX export uses a 640 × 640 input by default, raw YOLO output, and NMS disabled. WildlifeVision performs class-aware non-maximum suppression itself. The labels file is a JSON array in class-ID order, which the app accepts directly.
-
-## Notes
-
-- The browser app does not run Python or train YOLO itself. Training happens in the Python environment where this script is run; the exported ONNX and labels files are then loaded into the browser.
-- Keep the original dataset ZIP and `best.pt` checkpoint. ONNX is for deployment; the PyTorch checkpoint is the better starting point for future fine-tuning.
-- Training metrics depend on annotation quality, class balance, image diversity, and split size. A completed training run does not guarantee strong recognition for rare species.
+The ONNX export uses a 640 × 640 input by default, raw YOLO output, and NMS disabled. WildlifeVision performs class-aware non-maximum suppression itself. Keep the original ZIP and best.pt for future fine-tuning.

@@ -7,7 +7,8 @@ This is the actual YOLO11 training path. Dataset Studio remains the source of im
 1. Open WildlifeVision → Bird Library.
 2. Click **Train YOLO11 in Colab**. The app opens the Colab notebook and starts exporting the current in-browser dataset.
 3. In the notebook, upload the downloaded `WildlifeVision-YOLO-dataset.zip` when prompted.
-4. Run the notebook cells in order. It installs the dependencies, trains YOLO11, exports ONNX, and downloads `best.onnx` and `best.labels.json`.
+4. Run the training section's code cell once to display the **Train YOLO11** button, then click that button. It starts training and ONNX export and streams the log below it.
+5. After training completes, run the download cell to download `best.onnx`, `best.labels.json`, and `best.pt`.
 5. Back in WildlifeVision → Live camera, choose the ONNX file, upload the labels JSON, and load YOLO11.
 
 The ZIP is the transfer format between the browser's private IndexedDB library and the separate Colab runtime. The app cannot directly expose its local browser database to Google's remote Python runtime.

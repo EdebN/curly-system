@@ -167,7 +167,13 @@ def main() -> int:
         print(f"  {index:>2}: {name}")
     print("\nStarting Ultralytics training. A GPU is recommended; CPU training is supported but slow.\n")
 
-    model = YOLO(args.model)
+    if args.resume:
+        last_checkpoint = output / "runs" / args.name / "weights" / "last.pt"
+        if not last_checkpoint.is_file():
+            parser.error(f"No checkpoint to resume at {last_checkpoint}")
+        model = YOLO(str(last_checkpoint))
+    else:
+        model = YOLO(args.model)
     train_args: dict[str, Any] = {
         "data": str(resolved_yaml),
         "epochs": args.epochs,

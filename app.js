@@ -2019,6 +2019,21 @@
   }
   $('exportCsv').addEventListener('click', exportCSV);
 
+  // Launch the hosted Colab workflow and export the current in-browser Bird Library.
+  // window.open runs synchronously inside the click gesture to avoid popup blockers.
+  $('trainYoloColab').addEventListener('click', () => {
+    const notebookUrl = 'https://colab.research.google.com/github/EdebN/curly-system/blob/webgpu-yolo-training/training/WildlifeVision_YOLO_Trainer.ipynb';
+    const notebook = window.open(notebookUrl, '_blank');
+    if (!notebook) {
+      $('importStatus').textContent = 'Pop-up blocked. Allow pop-ups, then click Train YOLO11 in Colab again.';
+      log('Could not open the Colab trainer because the browser blocked the new tab.', 'warn');
+      return;
+    }
+    $('importStatus').textContent = 'Colab opened. Exporting your Bird Library dataset ZIP now; upload that ZIP in the notebook.';
+    log('Opened the Python YOLO11 trainer in Google Colab; exporting the current Bird Library dataset.');
+    $('exportYolo').click();
+  });
+
   $('exportYolo').addEventListener('click', async () => {
     const boxed = state.records.filter(record => (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) && record.speciesLabel && !['Unlabelled','Unknown'].includes(record.speciesLabel.trim()));
     if (!boxed.length) { $('importStatus').textContent = 'Annotate at least one bird bounding box before exporting a YOLO dataset.'; return; }

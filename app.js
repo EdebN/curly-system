@@ -1510,6 +1510,25 @@
   }
   const selectedRecords = new Set();
   let selectionMode = false;
+  function recordBoxes(record) {
+    if (Array.isArray(record.boxes)) return record.boxes;
+    return record.box ? [{ box: record.box, confidence: record.boxConfidence ?? 1, source: record.boxSource || 'legacy', review: record.boxReview || 'pending' }] : [];
+  }
+  function isHumanVerifiedBox(item) {
+    return item.source === 'manual' || item.review === 'verified' || item.review === 'reviewed';
+  }
+  function recordIsHumanVerified(record) {
+    const boxes = recordBoxes(record);
+    return boxes.length > 0 && boxes.every(isHumanVerifiedBox);
+  }
+  function recordUncertainty(record) {
+    const boxes = recordBoxes(record);
+    if (!boxes.length) return 100;
+    const values = boxes.map(item => isHumanVerifiedBox(item)
+      ? 0
+      : Math.max(0, Math.min(100, (1 - (Number(item.confidence) || 0)) * 100)));
+    return values.reduce((sum, value) => sum + value, 0) / values.length;
+  }
   function visibleLibraryRecords() {
     const search = $('librarySearch').value.trim().toLowerCase();
     const split = $('splitFilter').value;
@@ -1518,9 +1537,15 @@
       (record.filename + ' ' + record.speciesLabel).toLowerCase().includes(search) &&
       (split === 'all' || record.split === split)
     );
-    if (sort === 'uncertain') records.sort((a,b) => (Number(a.boxConfidence) || 0) - (Number(b.boxConfidence) || 0));
-    else if (sort === 'confident') records.sort((a,b) => (Number(b.boxConfidence) || 0) - (Number(a.boxConfidence) || 0));
-    else if (sort === 'unboxed') records.sort((a,b) => Number(Boolean(a.box)) - Number(Boolean(b.box)));
+    if (sort === 'uncertain') records.sort((a,b) => {
+      const aVerified = recordIsHumanVerified(a), bVerified = recordIsHumanVerified(b);
+      return Number(aVerified) - Number(bVerified) || recordUncertainty(b) - recordUncertainty(a);
+    });
+    else if (sort === 'confident') records.sort((a,b) => {
+      const aVerified = recordIsHumanVerified(a), bVerified = recordIsHumanVerified(b);
+      return Number(bVerified) - Number(aVerified) || recordUncertainty(a) - recordUncertainty(b);
+    });
+    else if (sort === 'unboxed') records.sort((a,b) => Number(recordBoxes(a).length > 0) - Number(recordBoxes(b).length > 0));
     return records;
   }
   function updateSelectionBar() {
@@ -1592,10 +1617,12 @@
       const filename = document.createElement('p'); filename.textContent = record.filename; filename.title = record.filename;
       const foot = document.createElement('div'); foot.className = 'image-card-foot';
       const badge = document.createElement('span'); badge.className = 'split-badge'; badge.textContent = record.split;
-      const quality = document.createElement('span'); quality.className = 'split-badge'; quality.textContent = (Array.isArray(record.boxes) ? record.boxes.length : (record.box ? 1 : 0)) + ' / 2 boxes';
+      const boxes = recordBoxes(record);
+      const quality = document.createElement('span'); quality.className = 'split-badge'; quality.textContent = boxes.length + (boxes.length === 1 ? ' box' : ' boxes');
+      const verified = document.createElement('span'); verified.className = 'split-badge'; verified.textContent = recordIsHumanVerified(record) ? 'Verified' : 'Needs review';
       const edit = document.createElement('button'); edit.className = 'edit-button'; edit.textContent = 'Edit';
       edit.addEventListener('click', (event) => { event.stopPropagation(); if (!selectionMode) editRecord(record.id); else toggleRecordSelection(record.id); });
-      foot.append(badge, quality, edit); body.append(label, filename, foot); card.append(img, tick, body);
+      foot.append(badge, quality, verified, edit); body.append(label, filename, foot); card.append(img, tick, body);
       root.append(card);
     });
     updateSelectionBar();
@@ -1811,6 +1838,10 @@
     $('annotationStatus').textContent = uncertainty === null
       ? 'Uncertainty: —'
       : 'Average uncertainty: ' + (uncertainty < 1 ? uncertainty.toFixed(1) : Math.round(uncertainty)) + '%';
+    const allVerified = boxes.length > 0 && boxes.every(isHumanVerifiedBox);
+    $('verifyAnnotations').textContent = allVerified ? 'Verified' : 'Mark verified';
+    $('verifyAnnotations').classList.toggle('active', allVerified);
+    $('verifyAnnotations').disabled = boxes.length === 0;
     $('clearAnnotation').disabled = boxes.length === 0;
     $('removeLastAnnotation').disabled = boxes.length === 0;
   }
@@ -1855,6 +1886,11 @@
   }
   $('annotationCanvas').addEventListener('pointerup', finishAnnotation);
   $('annotationCanvas').addEventListener('pointercancel', finishAnnotation);
+  $('verifyAnnotations').addEventListener('click', () => {
+    annotationDraft = annotationDraft.map(item => ({ ...item, confidence: 1.01, review: 'verified' }));
+    if (annotationCurrent) annotationCurrent = { ...annotationCurrent, confidence: 1.01, review: 'verified' };
+    paintAnnotation();
+  });
   $('clearAnnotation').addEventListener('click', () => { annotationDraft = []; annotationCurrent = null; paintAnnotation(); });
   $('removeLastAnnotation').addEventListener('click', () => { annotationDraft.pop(); paintAnnotation(); });
 
@@ -1867,14 +1903,14 @@
     record.split = $('editSplit').value;
     record.boxes = annotationDraft.map(item => ({
       box: { ...item.box },
-      confidence: item.source === 'manual' ? 1.01 : (item.confidence ?? 1),
+      confidence: isHumanVerifiedBox(item) ? 1.01 : (item.confidence ?? 1),
       source: item.source || 'manual',
-      review: item.source === 'manual' ? 'reviewed' : (item.review || 'pending')
+      review: isHumanVerifiedBox(item) ? 'verified' : (item.review || 'pending')
     }));
     record.box = record.boxes.length ? { ...record.boxes[0].box } : null;
     record.boxConfidence = record.boxes.length ? record.boxes[0].confidence : null;
-    record.boxSource = record.boxes.length ? 'manual' : null;
-    record.boxReview = record.boxes.length ? 'reviewed' : null;
+    record.boxSource = record.boxes.length ? record.boxes[0].source : null;
+    record.boxReview = record.boxes.length ? record.boxes[0].review : null;
     try {
       await dbRequest('readwrite', (store) => store.put(record));
       $('editDialog').close();

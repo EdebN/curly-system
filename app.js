@@ -1646,14 +1646,67 @@
   $('splitFilter').addEventListener('change', renderLibrary);
   $('annotationSort').addEventListener('change', renderLibrary);
 
+  async function classifyStaticRegion(image, box) {
+    const crop = document.createElement('canvas');
+    crop.width = 224; crop.height = 224;
+    const cropCtx = crop.getContext('2d');
+    cropCtx.fillStyle = '#fff'; cropCtx.fillRect(0, 0, 224, 224);
+    cropCtx.drawImage(image, box.x, box.y, box.width, box.height, 0, 0, 224, 224);
+    const features = await extractFeatures(crop);
+    let best = null;
+    for (const sample of state.trainingSamples) {
+      const similarity = cosineSimilarity(features, sample.features);
+      if (!best || similarity > best.similarity) best = { label: sample.label, similarity };
+    }
+    return best || { label: 'Unmatched', similarity: 0 };
+  }
+
+  async function proposeLearnedBox(image) {
+    const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
+    const minSide = Math.min(width, height);
+    const candidates = [{ x: 0, y: 0, width, height }];
+    // A compact image pyramid: overlapping windows at three scales. This lets
+    // the learned examples propose a location when COCO-SSD misses the bird.
+    for (const fraction of [0.34, 0.50, 0.68]) {
+      const side = Math.max(32, Math.round(minSide * fraction));
+      const maxX = Math.max(0, width - side), maxY = Math.max(0, height - side);
+      const positions = [0, 0.5, 1];
+      for (const py of positions) for (const px of positions) {
+        candidates.push({
+          x: Math.round(maxX * px), y: Math.round(maxY * py),
+          width: Math.min(side, width), height: Math.min(side, height)
+        });
+      }
+    }
+    let best = null;
+    for (let i = 0; i < candidates.length; i++) {
+      const box = candidates[i];
+      const match = await classifyStaticRegion(image, box);
+      if (!best || match.similarity > best.similarity) best = { box, ...match };
+      if (i % 5 === 4) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    if (!best || best.label === 'Unmatched' || best.similarity < 0.62) return null;
+    return {
+      x: best.box.x / width, y: best.box.y / height,
+      width: best.box.width / width, height: best.box.height / height,
+      confidence: best.similarity, label: best.label
+    };
+  }
+
   $('autoAnnotate').addEventListener('click', async () => {
     const candidates = state.records.filter(record => !record.box);
     if (!candidates.length) { $('importStatus').textContent = 'Every image already has a box. Use the uncertainty sort to review existing annotations.'; return; }
     const button = $('autoAnnotate'); button.disabled = true;
     try {
-      if (!state.detectorModel) await loadAIModels();
+      if (!state.detectorModel || !state.featureModel) await loadAIModels();
       if (!state.detectorModel) throw new Error('COCO-SSD detector did not load.');
-      let found = 0, missed = 0, failed = 0;
+      const saved = await trainingStoreRequest('readonly', store => store.get('speciesMatcher'));
+      if (saved && Array.isArray(saved.samples) && saved.samples.length) {
+        state.trainingSamples = saved.samples;
+        state.trainingReady = true;
+        state.hasSavedTraining = true;
+      }
+      let found = 0, learned = 0, missed = 0, failed = 0;
       for (let i = 0; i < candidates.length; i++) {
         const record = candidates[i];
         let image = null, url = null;
@@ -1663,18 +1716,32 @@
           image.decoding = 'async';
           image.src = url;
           await image.decode();
+          const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
           const predictions = await state.detectorModel.detect(image, 20, 0.12);
           const birds = predictions.filter(item => String(item.class).toLowerCase() === 'bird' && Array.isArray(item.bbox) && item.bbox.length >= 4);
           birds.sort((a,b) => b.score - a.score);
+          let box = null, confidence = 0, source = '';
           if (birds.length) {
-            const p = birds[0], width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
-            const x = Math.max(0, Math.min(1, p.bbox[0] / width));
-            const y = Math.max(0, Math.min(1, p.bbox[1] / height));
-            const w = Math.max(0, Math.min(1 - x, p.bbox[2] / width));
-            const h = Math.max(0, Math.min(1 - y, p.bbox[3] / height));
-            record.box = { x, y, width: w, height: h };
-            record.boxConfidence = Number(p.score) || 0;
-            record.boxSource = 'coco-ssd-auto';
+            const p = birds[0];
+            const x = Math.max(0, Math.min(width, p.bbox[0]));
+            const y = Math.max(0, Math.min(height, p.bbox[1]));
+            box = { x: x / width, y: y / height, width: Math.max(0, Math.min(1 - x / width, p.bbox[2] / width)), height: Math.max(0, Math.min(1 - y / height, p.bbox[3] / height)) };
+            confidence = Number(p.score) || 0;
+            source = 'coco-ssd-auto';
+          } else if (state.trainingReady && state.featureModel) {
+            const proposal = await proposeLearnedBox(image);
+            if (proposal) {
+              box = { x: proposal.x, y: proposal.y, width: proposal.width, height: proposal.height };
+              confidence = proposal.confidence;
+              source = 'learned-matcher-proposal';
+              learned++;
+            }
+          }
+          if (box && box.width > 0 && box.height > 0) {
+            record.box = box;
+            record.boxConfidence = confidence;
+            record.boxSource = source;
+            record.boxReview = 'pending';
             await dbRequest('readwrite', store => store.put(record));
             found++;
           } else missed++;
@@ -1685,17 +1752,17 @@
           if (url) URL.revokeObjectURL(url);
           image = null;
         }
-        if ((i + 1) % 5 === 0 || i + 1 === candidates.length) {
-          $('importStatus').textContent = 'Auto-detecting bird boxes ' + (i + 1) + '/' + candidates.length + ' · found ' + found + ' · no bird ' + missed + ' · errors ' + failed;
+        if ((i + 1) % 3 === 0 || i + 1 === candidates.length) {
+          $('importStatus').textContent = 'Proposing boxes ' + (i + 1) + '/' + candidates.length + ' · found ' + found + ' · learned proposals ' + learned + ' · review ' + missed + ' · errors ' + failed;
           renderLibrary();
         }
         await new Promise(resolve => setTimeout(resolve, 0));
       }
-      $('importStatus').textContent = 'Auto-annotation complete: ' + found + ' boxes created · ' + missed + ' images need review · ' + failed + ' errors. Sort by uncertainty to review detections.';
-      log('Auto-annotation complete: ' + found + ' bird boxes, ' + missed + ' no detections, ' + failed + ' errors.');
+      $('importStatus').textContent = 'Box proposals complete: ' + found + ' created (' + (found - learned) + ' COCO-SSD, ' + learned + ' learned-model proposals) · ' + missed + ' need manual review · ' + failed + ' errors. Review all automatic boxes before exporting.';
+      log('Auto-annotation complete: ' + found + ' proposals (' + learned + ' from learned matcher), ' + missed + ' unboxed, ' + failed + ' errors.');
       renderLibrary();
     } catch (error) {
-      $('importStatus').textContent = 'Could not auto-detect boxes: ' + error.message;
+      $('importStatus').textContent = 'Could not propose boxes: ' + error.message;
       log('Auto-annotation could not start: ' + error.message, 'error');
     } finally { button.disabled = false; }
   });

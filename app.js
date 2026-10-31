@@ -1513,10 +1513,15 @@
   function visibleLibraryRecords() {
     const search = $('librarySearch').value.trim().toLowerCase();
     const split = $('splitFilter').value;
-    return state.records.filter((record) =>
+    const sort = $('annotationSort') ? $('annotationSort').value : 'default';
+    const records = state.records.filter((record) =>
       (record.filename + ' ' + record.speciesLabel).toLowerCase().includes(search) &&
       (split === 'all' || record.split === split)
     );
+    if (sort === 'uncertain') records.sort((a,b) => (Number(a.boxConfidence) || 0) - (Number(b.boxConfidence) || 0));
+    else if (sort === 'confident') records.sort((a,b) => (Number(b.boxConfidence) || 0) - (Number(a.boxConfidence) || 0));
+    else if (sort === 'unboxed') records.sort((a,b) => Number(Boolean(a.box)) - Number(Boolean(b.box)));
+    return records;
   }
   function updateSelectionBar() {
     $('selectionCount').textContent = selectedRecords.size + ' selected';
@@ -1587,9 +1592,10 @@
       const filename = document.createElement('p'); filename.textContent = record.filename; filename.title = record.filename;
       const foot = document.createElement('div'); foot.className = 'image-card-foot';
       const badge = document.createElement('span'); badge.className = 'split-badge'; badge.textContent = record.split;
+      const quality = document.createElement('span'); quality.className = 'split-badge'; quality.textContent = record.box ? (record.boxConfidence != null ? Math.round(record.boxConfidence * 100) + '% box confidence' : 'Box saved') : 'No box';
       const edit = document.createElement('button'); edit.className = 'edit-button'; edit.textContent = 'Edit';
       edit.addEventListener('click', (event) => { event.stopPropagation(); if (!selectionMode) editRecord(record.id); else toggleRecordSelection(record.id); });
-      foot.append(badge, edit); body.append(label, filename, foot); card.append(img, tick, body);
+      foot.append(badge, quality, edit); body.append(label, filename, foot); card.append(img, tick, body);
       root.append(card);
     });
     updateSelectionBar();
@@ -1638,6 +1644,61 @@
   });
   $('librarySearch').addEventListener('input', renderLibrary);
   $('splitFilter').addEventListener('change', renderLibrary);
+  $('annotationSort').addEventListener('change', renderLibrary);
+
+  $('autoAnnotate').addEventListener('click', async () => {
+    const candidates = state.records.filter(record => !record.box);
+    if (!candidates.length) { $('importStatus').textContent = 'Every image already has a box. Use the uncertainty sort to review existing annotations.'; return; }
+    const button = $('autoAnnotate'); button.disabled = true;
+    try {
+      if (!state.detectorModel) await loadAIModels();
+      if (!state.detectorModel) throw new Error('COCO-SSD detector did not load.');
+      let found = 0, missed = 0, failed = 0;
+      for (let i = 0; i < candidates.length; i++) {
+        const record = candidates[i];
+        let image = null, url = null;
+        try {
+          url = URL.createObjectURL(record.blob);
+          image = new Image();
+          image.decoding = 'async';
+          image.src = url;
+          await image.decode();
+          const predictions = await state.detectorModel.detect(image, 20, 0.12);
+          const birds = predictions.filter(item => String(item.class).toLowerCase() === 'bird' && Array.isArray(item.bbox) && item.bbox.length >= 4);
+          birds.sort((a,b) => b.score - a.score);
+          if (birds.length) {
+            const p = birds[0], width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
+            const x = Math.max(0, Math.min(1, p.bbox[0] / width));
+            const y = Math.max(0, Math.min(1, p.bbox[1] / height));
+            const w = Math.max(0, Math.min(1 - x, p.bbox[2] / width));
+            const h = Math.max(0, Math.min(1 - y, p.bbox[3] / height));
+            record.box = { x, y, width: w, height: h };
+            record.boxConfidence = Number(p.score) || 0;
+            record.boxSource = 'coco-ssd-auto';
+            await dbRequest('readwrite', store => store.put(record));
+            found++;
+          } else missed++;
+        } catch (error) {
+          failed++;
+          log('Auto-annotation failed for ' + record.filename + ': ' + error.message, 'warn');
+        } finally {
+          if (url) URL.revokeObjectURL(url);
+          image = null;
+        }
+        if ((i + 1) % 5 === 0 || i + 1 === candidates.length) {
+          $('importStatus').textContent = 'Auto-detecting bird boxes ' + (i + 1) + '/' + candidates.length + ' · found ' + found + ' · no bird ' + missed + ' · errors ' + failed;
+          renderLibrary();
+        }
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+      $('importStatus').textContent = 'Auto-annotation complete: ' + found + ' boxes created · ' + missed + ' images need review · ' + failed + ' errors. Sort by uncertainty to review detections.';
+      log('Auto-annotation complete: ' + found + ' bird boxes, ' + missed + ' no detections, ' + failed + ' errors.');
+      renderLibrary();
+    } catch (error) {
+      $('importStatus').textContent = 'Could not auto-detect boxes: ' + error.message;
+      log('Auto-annotation could not start: ' + error.message, 'error');
+    } finally { button.disabled = false; }
+  });
 
   let annotationDraft = null;
   let annotationDrag = null;
@@ -1702,6 +1763,8 @@
     record.speciesLabel = $('editLabel').value.trim() || 'Unlabelled';
     record.split = $('editSplit').value;
     record.box = annotationDraft && annotationDraft.width > 0.01 && annotationDraft.height > 0.01 ? { ...annotationDraft } : null;
+    if (record.box) { record.boxConfidence = record.boxSource === 'coco-ssd-auto' ? record.boxConfidence : 1; record.boxSource = 'manual'; }
+    else { record.boxConfidence = null; record.boxSource = null; }
     try {
       await dbRequest('readwrite', (store) => store.put(record));
       $('editDialog').close();
@@ -1715,10 +1778,10 @@
 
   function csvEscape(value) { return '"' + String(value == null ? '' : value).replace(/"/g, '""') + '"'; }
   function exportCSV() {
-    const header = ['filename','species_label','split','relative_path','sha256','box_x','box_y','box_width','box_height'];
+    const header = ['filename','species_label','split','relative_path','sha256','box_x','box_y','box_width','box_height','box_confidence','box_source'];
     const lines = state.records.map((record) => {
       const box = record.box || {};
-      return [csvEscape(record.filename),csvEscape(record.speciesLabel),record.split,csvEscape(record.relativePath),record.sha256,box.x ?? '',box.y ?? '',box.width ?? '',box.height ?? ''].join(',');
+      return [csvEscape(record.filename),csvEscape(record.speciesLabel),record.split,csvEscape(record.relativePath),record.sha256,box.x ?? '',box.y ?? '',box.width ?? '',box.height ?? '',record.boxConfidence ?? '',record.boxSource ?? ''].join(',');
     });
     const blob = new Blob([[header.join(','), ...lines].join('\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);

@@ -139,7 +139,7 @@
     <section id="libraryPanel" class="panel">
       <div class="section-heading">
         <div><p class="eyebrow">LOCAL DATASET</p><h2>Bird image library</h2><p class="muted">Images and labels are stored in this browser on this device using IndexedDB.</p></div>
-        <div class="library-heading-actions"><button id="trainSpecies" class="button primary">Learn from labelled photos</button><button id="exportModel" class="button secondary" disabled>Export trained model</button><label class="button secondary file-button">Import trained model<input id="modelPicker" type="file" accept=".wvmodel,.json,application/json"></label><button id="exportCsv" class="button secondary" disabled>Export CSV</button></div>
+        <div class="library-heading-actions"><button id="trainSpecies" class="button primary">Learn from labelled photos</button><button id="exportModel" class="button secondary" disabled>Export trained model</button><label class="button secondary file-button">Import trained model<input id="modelPicker" type="file" accept=".wvmodel,.json,application/json"></label><button id="exportCsv" class="button secondary" disabled>Export CSV</button><button id="exportYolo" class="button secondary" disabled>Export YOLO dataset</button></div>
       </div>
       <div class="library-metrics">
         <div class="metric-card"><span class="metric-label">Images</span><strong id="imageTotal">0</strong></div>
@@ -201,7 +201,9 @@
   <dialog id="editDialog" class="edit-dialog">
     <form method="dialog" id="editForm">
       <div class="dialog-heading"><div><p class="eyebrow">DATASET REVIEW</p><h2>Edit image record</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
-      <img id="editPreview" class="edit-preview" alt="Selected dataset image">
+      <div class="annotation-wrap"><img id="editPreview" class="edit-preview" alt="Selected dataset image"><canvas id="annotationCanvas" aria-label="Draw a bounding box around the bird"></canvas></div>
+      <p class="helper">Draw a tight rectangle around the bird. Drag across the image to create or replace its bounding box. One bird per image for this first detector dataset.</p>
+      <div class="annotation-actions"><button id="clearAnnotation" type="button" class="button tiny secondary">Clear box</button><span id="annotationStatus" class="helper">No bounding box</span></div>
       <label class="form-label" for="editLabel">Species label</label><input id="editLabel" class="text-input" maxlength="120" placeholder="e.g. Australian magpie">
       <label class="form-label" for="editSplit">Dataset split</label><select id="editSplit" class="select-input"><option value="unassigned">Unassigned</option><option value="train">Train</option><option value="validation">Validation</option><option value="test">Test</option></select>
       <p class="helper">The species matcher learns visual examples from your labelled photos in this browser. It does not update the underlying detector weights; correct labels and varied examples improve matching.</p>

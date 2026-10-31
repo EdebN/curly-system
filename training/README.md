@@ -15,7 +15,7 @@ This is the YOLO11 training path. WildlifeVision prepares the image dataset and 
 
 ### In Google Colab
 
-7. Press **Train in Colab** in Bird Library to open the notebook.
+7. Press **Train in Colab** in Bird Library to open the notebook. The button is grouped with the other preparation steps, above the image grid.
 8. Select **Runtime → Change runtime type → T4 GPU**.
 9. Upload the WildlifeVision-YOLO-dataset.zip saved in step 6.
 10. Run the cell that displays **Train YOLO11**, then click the button.
@@ -50,7 +50,22 @@ Then train from the exported ZIP:
 python training/train_yolo.py WildlifeVision-YOLO-dataset.zip --epochs 100 --imgsz 640
 ```
 
-The script also accepts an extracted dataset directory. Useful options include --model, --epochs, --imgsz, --batch, --device, --workers, --output, --name, and --patience.
+The script also accepts an extracted dataset directory. Use `--model best.pt` to fine-tune a previous checkpoint instead of starting from `yolo11n.pt`.
+
+## Add species or more training images
+
+You cannot add training data directly to an `.onnx` file. ONNX is the exported inference model. The editable training checkpoint is `best.pt`.
+
+For more images of existing species:
+
+1. Add and label the new photos in WildlifeVision.
+2. Keep the existing species images in the library and export a dataset ZIP containing both the old and new reviewed examples.
+3. In Colab, upload that ZIP and the latest `best.pt` together.
+4. Train. The previous detector weights are used as the starting point, then a fresh ONNX and labels file are exported.
+
+For new species, do the same but include labelled images and verified boxes for the new species. Keep examples of the old species in the combined dataset too. The class list is read from the new ZIP; Ultralytics reuses compatible weights and adapts the detection head for the new number of classes. Always load the new ONNX together with its matching `best.labels.json`.
+
+**Do not use the old ONNX as the training checkpoint.** Keep each new `best.pt` and use it for the next round. This is incremental fine-tuning from a checkpoint, not a literal append operation to the ONNX file.
 
 ## Load the model in WildlifeVision
 

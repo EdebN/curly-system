@@ -1623,6 +1623,67 @@
     try {
       $('importStatus').textContent = 'Opening ZIP archive…';
       const zip = await window.JSZip.loadAsync(file);
+      const manifestEntry = zip.file('wildlifevision-metadata.json');
+      if (manifestEntry) {
+        const manifest = JSON.parse(await manifestEntry.async('string'));
+        if (manifest.format !== 'wildlifevision-yolo-roundtrip' || manifest.version !== 1 || !Array.isArray(manifest.records)) {
+          throw new Error('The WildlifeVision metadata file has an unsupported format or version.');
+        }
+        const imageEntries = Object.values(zip.files).filter(entry => !entry.dir && entry.name.startsWith('images/') && isImageFile({name: entry.name, type: ''}, entry.name));
+        const byPath = new Map(imageEntries.map(entry => [entry.name, entry]));
+        const existingHashes = new Set(state.records.map(record => record.sha256).filter(Boolean));
+        let restored = 0, duplicates = 0, missing = 0, failed = 0;
+        $('importStatus').textContent = 'Restoring annotations and image metadata…';
+        for (let i = 0; i < manifest.records.length; i++) {
+          const item = manifest.records[i];
+          try {
+            const entry = byPath.get(item.imagePath);
+            if (!entry) { missing++; continue; }
+            const blob = await entry.async('blob');
+            const filename = item.filename || entry.name.split('/').pop();
+            const hash = await digestFile(blob);
+            if (existingHashes.has(hash)) { duplicates++; continue; }
+            existingHashes.add(hash);
+            const boxes = Array.isArray(item.boxes) ? item.boxes.map(boxItem => ({
+              box: { ...boxItem.box },
+              confidence: Number.isFinite(boxItem.confidence) ? boxItem.confidence : 1,
+              source: boxItem.source || 'legacy',
+              review: boxItem.review || 'pending',
+              speciesLabel: boxItem.speciesLabel || item.speciesLabel || 'Unlabelled'
+            })) : [];
+            const record = {
+              id: newId(), filename, sourceName: item.sourceName || filename,
+              relativePath: item.relativePath || filename,
+              speciesLabel: item.speciesLabel || 'Unlabelled',
+              split: ['train','validation','test'].includes(item.split) ? item.split : 'unassigned',
+              sha256: item.sha256 || hash, importedAt: Date.now(),
+              box: boxes.length ? { ...boxes[0].box } : null,
+              boxes,
+              boxConfidence: boxes.length ? boxes[0].confidence : null,
+              boxSource: boxes.length ? boxes[0].source : null,
+              boxReview: boxes.length ? boxes[0].review : null,
+              blob
+            };
+            await dbRequest('readwrite', store => store.add(record));
+            state.records.unshift(record);
+            restored++;
+          } catch (error) {
+            failed++;
+            log('Could not restore ' + (item.filename || item.imagePath || 'image') + ': ' + error.message, 'warn');
+          }
+          if (i % 10 === 0 || i + 1 === manifest.records.length) {
+            $('importStatus').textContent = 'Restoring ' + (i + 1) + '/' + manifest.records.length +
+              ' · restored ' + restored + ' · duplicates ' + duplicates + ' · missing ' + missing + ' · errors ' + failed;
+            await new Promise(resolve => setTimeout(resolve, 0));
+          }
+        }
+        renderLibrary();
+        await reportStorageUsage();
+        $('importStatus').textContent = 'Round-trip import complete: ' + restored + ' images restored with box coordinates, species labels, verification status and confidence. ' +
+          duplicates + ' duplicates skipped · ' + missing + ' missing images · ' + failed + ' errors.';
+        log('WildlifeVision round-trip import complete: ' + restored + ' restored, ' + duplicates + ' duplicates, ' + missing + ' missing, ' + failed + ' errors.');
+        return;
+      }
       const entries = Object.values(zip.files).filter((entry) => !entry.dir && isImageFile({name: entry.name, type: ''}, entry.name));
       if (!entries.length) {
         $('importStatus').textContent = 'No supported photos found inside that ZIP.';
@@ -2293,6 +2354,7 @@
       const yamlNames = classes.map(name => '  - ' + JSON.stringify(name)).join('\n');
       zip.file('dataset.yaml', 'path: .\ntrain: images/train\nval: images/val\ntest: images/test\nnc: ' + classes.length + '\nnames:\n' + yamlNames + '\n');
       let written = 0;
+      const roundTripRecords = [];
       for (const [split, records] of Object.entries(splitBuckets)) {
         for (const record of records) {
           const stem = String(record.id).replace(/[^a-zA-Z0-9_-]/g,'_');
@@ -2314,16 +2376,42 @@
           if (!imageBytes.byteLength) {
             throw new Error('Image "' + (record.filename || stem) + '" is empty. Re-import it before exporting.');
           }
-          zip.file('images/' + split + '/' + stem + ext, imageBytes);
-          const boxes = Array.isArray(record.boxes) && record.boxes.length ? record.boxes.map(item => item.box) : (record.box ? [record.box] : []);
+          const imagePath = 'images/' + split + '/' + stem + ext;
+          zip.file(imagePath, imageBytes);
+          const recordBoxesForExport = recordBoxes(record);
+          const boxes = recordBoxesForExport.map(item => item.box);
           const lines = boxes.map(b => {
             const cx = b.x + b.width / 2, cy = b.y + b.height / 2;
             return [classIds.get(record.speciesLabel.trim()), cx, cy, b.width, b.height].join(' ');
           });
           zip.file('labels/' + split + '/' + stem + '.txt', lines.join('\n') + (lines.length ? '\n' : ''));
+          roundTripRecords.push({
+            imagePath,
+            filename: record.filename,
+            sourceName: record.sourceName || record.filename,
+            relativePath: record.relativePath || record.filename,
+            speciesLabel: record.speciesLabel,
+            split: record.split,
+            sha256: record.sha256 || null,
+            boxes: recordBoxesForExport.map(item => ({
+              box: { ...item.box },
+              confidence: item.confidence ?? 1,
+              source: item.source || 'legacy',
+              review: item.review || 'pending',
+              speciesLabel: item.speciesLabel || record.speciesLabel
+            }))
+          });
           written++;
         }
       }
+      // This sidecar preserves review metadata that standard YOLO TXT labels cannot represent.
+      zip.file('wildlifevision-metadata.json', JSON.stringify({
+        format: 'wildlifevision-yolo-roundtrip',
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        classes,
+        records: roundTripRecords
+      }, null, 2));
       // Export is read-only: do not write Blob/File records back to IndexedDB.
       // Some Safari/iOS versions reject cloning File-backed Blobs during put(),
       // which caused the export to fail before the ZIP could be generated.

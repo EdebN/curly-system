@@ -965,10 +965,33 @@
     }
   }
 
+  function splitSpeciesLabel(value) {
+    const label = String(value || 'Unknown bird').trim();
+    const match = label.match(/^(.*?)\\s*\\(([^)]+)\\)\\s*$/);
+    return { common: (match ? match[1] : label).trim(), scientific: match ? match[2].trim() : '' };
+  }
+
+  function drawHumanGlyph(x, y, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(x + 7, y + 4, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(x + 7, y + 9); ctx.lineTo(x + 7, y + 17);
+    ctx.moveTo(x + 2, y + 12); ctx.lineTo(x + 12, y + 12);
+    ctx.moveTo(x + 7, y + 17); ctx.lineTo(x + 3, y + 23);
+    ctx.moveTo(x + 7, y + 17); ctx.lineTo(x + 11, y + 23);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawAIDetections() {
     sizeCanvases();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    drawSpatialOverlay();
     if (state.showMasks) {
       state.masks.forEach((mask) => {
         const mx = mask.x * canvas.width, my = mask.y * canvas.height;
@@ -990,44 +1013,49 @@
       const y = Math.max(0, Math.min(ch, box[1] * sy));
       const w = Math.max(0, Math.min(cw - x, box[2] * sx));
       const h = Math.max(0, Math.min(ch - y, box[3] * sy));
-      const pct = Math.round(item.prediction.score * 100);
-      const rawLabel = item.match.label === 'Unmatched' ? String(item.prediction.class || 'OBJECT') : item.match.label;
-      const spatial = state.spatialTracks.find((track) => track.missed === 0 && track.item === item);
-      const label = (spatial ? '#' + spatial.id + ' ' : '') + rawLabel.toUpperCase();
-      const place = spatial && state.showCoordinates ? relativePosition(spatial.cx, spatial.cy).toUpperCase() + ' · ' : '';
-      const motion = spatial && state.showCoordinates ? movementLabel(spatial) + ' · ' : '';
-      const text = label + '  ' + pct + '% · ' + place + motion;
+      const pct = Math.round(Math.max(0, Math.min(1, Number(item.prediction.score) || 0)) * 100);
+      const detectorLabel = String(item.prediction.class || '').toLowerCase();
+      const human = detectorLabel === 'person' || detectorLabel === 'human';
+      const rawLabel = item.match.label === 'Unmatched'
+        ? String(item.prediction.class || 'Unknown bird')
+        : item.match.label;
+      const species = splitSpeciesLabel(rawLabel);
+      const accent = human ? '#63c7ff' : '#d6b47a';
+
       ctx.save();
-      // A dark halo keeps the box legible against both bright sky and dark foliage.
-      ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(0,0,0,.72)'; ctx.strokeRect(x, y, w, h);
-      ctx.lineWidth = 2.5; ctx.strokeStyle = '#d6b47a'; ctx.strokeRect(x, y, w, h);
-      const corner = Math.min(13, Math.max(5, Math.min(w, h) * .16));
-      ctx.lineWidth = 4; ctx.strokeStyle = '#eaffb8';
-      ctx.beginPath();
-      ctx.moveTo(x, y + corner); ctx.lineTo(x, y); ctx.lineTo(x + corner, y);
-      ctx.moveTo(x + w - corner, y); ctx.lineTo(x + w, y); ctx.lineTo(x + w, y + corner);
-      ctx.moveTo(x, y + h - corner); ctx.lineTo(x, y + h); ctx.lineTo(x + corner, y + h);
-      ctx.moveTo(x + w - corner, y + h); ctx.lineTo(x + w, y + h); ctx.lineTo(x + w, y + h - corner);
-      ctx.stroke();
-      ctx.font = '700 12px ui-monospace, SFMono-Regular, Menlo, monospace';
-      const labelWidth = Math.min(cw, ctx.measureText(text).width + 18);
-      const labelHeight = 25;
-      // Prefer above the box; flip inside/below when the box touches the top.
+      // Fine, single-stroke rectangles keep the live image visible.
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = accent;
+      ctx.strokeRect(x, y, w, h);
+
+      ctx.font = '600 12px ui-sans-serif, system-ui, sans-serif';
+      const primary = human ? pct + '%' : species.common + '  ' + pct + '%';
+      const secondary = !human && species.scientific ? species.scientific : '';
+      const textWidth = Math.max(ctx.measureText(primary).width, secondary ? ctx.measureText(secondary).width : 0);
+      const iconWidth = human ? 18 : 0;
+      const labelWidth = Math.min(cw, Math.max(42, textWidth + iconWidth + 16));
+      const labelHeight = secondary ? 35 : 23;
       const labelX = Math.max(0, Math.min(cw - labelWidth, x));
-      const labelY = y >= labelHeight + 4 ? y - labelHeight - 2 : Math.min(ch - labelHeight, y + 2);
-      ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 8;
-      ctx.fillStyle = '#d6b47a';
+      const labelY = y >= labelHeight + 4 ? y - labelHeight - 3 : Math.min(ch - labelHeight, y + 2);
+
+      ctx.fillStyle = human ? 'rgba(8,35,52,.94)' : 'rgba(34,27,17,.94)';
       ctx.beginPath();
-      if (typeof ctx.roundRect === 'function') ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 5);
+      if (typeof ctx.roundRect === 'function') ctx.roundRect(labelX, labelY, labelWidth, labelHeight, 4);
       else ctx.rect(labelX, labelY, labelWidth, labelHeight);
       ctx.fill();
-      ctx.shadowBlur = 0;
-      ctx.fillStyle = '#211a10';
+      ctx.fillStyle = accent;
       ctx.textBaseline = 'middle';
-      const availableTextWidth = Math.max(0, labelWidth - 12);
-      let shown = text;
-      while (ctx.measureText(shown).width > availableTextWidth && shown.length > 4) shown = shown.slice(0, -2) + '…';
-      ctx.fillText(shown, labelX + 7, labelY + labelHeight / 2, availableTextWidth);
+      if (human) {
+        drawHumanGlyph(labelX + 5, labelY + 0, accent);
+        ctx.fillText(primary, labelX + 23, labelY + labelHeight / 2, labelWidth - 28);
+      } else {
+        ctx.fillText(primary, labelX + 7, labelY + (secondary ? 11 : labelHeight / 2), labelWidth - 14);
+        if (secondary) {
+          ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+          ctx.fillStyle = '#d0c3ad';
+          ctx.fillText(secondary, labelX + 7, labelY + 25, labelWidth - 14);
+        }
+      }
       ctx.restore();
     }
   }

@@ -357,13 +357,41 @@
     try {
       const bytes = await file.arrayBuffer();
       let session;
-      try {
-        session = await window.ort.InferenceSession.create(bytes, { executionProviders: ['webgpu', 'wasm'], graphOptimizationLevel: 'all' });
-        state.rfProvider = 'WebGPU / WASM fallback';
-      } catch (gpuError) {
-        log('WebGPU initialisation failed; retrying YOLO with WASM: ' + gpuError.message, 'warn');
-        session = await window.ort.InferenceSession.create(bytes, { executionProviders: ['wasm'], graphOptimizationLevel: 'all' });
-        state.rfProvider = 'WASM';
+      const canUseWebGPU = !!(navigator.gpu && window.ort.env && window.ort.env.webgpu);
+      if (window.ort.env && window.ort.env.wasm) {
+        // Keep Safari/iPad's WASM heap predictable. Multiple worker threads and
+        // memory arenas can multiply peak memory during session initialisation.
+        window.ort.env.wasm.numThreads = 1;
+        window.ort.env.wasm.proxy = false;
+      }
+      const lowMemoryOptions = {
+        graphOptimizationLevel: 'basic',
+        executionMode: 'sequential',
+        enableCpuMemArena: false,
+        enableMemPattern: false
+      };
+      if (canUseWebGPU) {
+        try {
+          session = await window.ort.InferenceSession.create(bytes, {
+            ...lowMemoryOptions,
+            executionProviders: ['webgpu']
+          });
+          state.rfProvider = 'WebGPU';
+        } catch (gpuError) {
+          log('WebGPU unavailable; trying single-threaded low-memory WASM: ' + gpuError.message, 'warn');
+        }
+      }
+      if (!session) {
+        try {
+          session = await window.ort.InferenceSession.create(bytes, {
+            ...lowMemoryOptions,
+            executionProviders: ['wasm']
+          });
+          state.rfProvider = 'WASM (low-memory)';
+        } catch (wasmError) {
+          const detail = wasmError && wasmError.message ? wasmError.message : String(wasmError);
+          throw new Error('The browser ran out of memory while loading this ONNX model. Close other heavy tabs and reload WildlifeVision. If this keeps happening, use a device/browser with more available memory. Runtime detail: ' + detail);
+        }
       }
       state.rfSession = session;
       state.rfModelName = file.name;

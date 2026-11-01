@@ -457,7 +457,7 @@
         let score = -Infinity, classId = 0;
         for (let c = 0; c < classCount; c++) {
           const raw = at(i, c + 4);
-          const confidence = raw >= 0 && raw <= 1 ? raw : 1 / (1 + Math.exp(-raw));
+          const confidence = Math.max(0, Math.min(1, raw));
           if (confidence > score) { score = confidence; classId = c; }
         }
         if (score < state.aiThreshold) continue;

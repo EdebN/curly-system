@@ -1891,7 +1891,12 @@
     for (let i = 0; i < boxCount; i++) {
       let score = -Infinity, classId = 0;
       for (let c = 0; c < classCount; c++) {
-        const raw = at(i, c + 4), confidence = raw >= 0 && raw <= 1 ? raw : 1 / (1 + Math.exp(-raw));
+        // Ultralytics YOLO11 ONNX exports already contain sigmoid-activated
+        // class probabilities. Never sigmoid these values again: tiny negative
+        // floating-point noise would become ~0.5 and create bogus top-left boxes.
+        const raw = at(i, c + 4);
+        if (!Number.isFinite(raw)) continue;
+        const confidence = Math.max(0, Math.min(1, raw));
         if (confidence > score) { score = confidence; classId = c; }
       }
       if (score < Math.max(0.18, Math.min(0.4, state.aiThreshold * 0.75))) continue;

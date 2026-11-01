@@ -2010,11 +2010,8 @@
     const button = $('autoAnnotate'); button.disabled = true;
     yoloDatasetSaved = false;
     try {
-      if (!state.detectorModel || !state.featureModel) await loadAIModels();
-      if (!state.rfSession) throw new Error('Load your trained YOLO11 ONNX model in the Model panel first.');
-      if (!state.trainingReady || !state.trainingSamples.length) throw new Error('Train or import your WildlifeVision species matcher first.');
-      const passes = 3;
-      let found = 0, improved = 0, missed = 0, failed = 0, cocoTotal = 0, yoloTotal = 0, learnedTotal = 0;
+      if (!state.rfSession) throw new Error('Load your trained YOLO11 ONNX model first. YOLO supplies both the species predictions and bounding boxes; the separate example matcher is not required.');
+      let found = 0, improved = 0, missed = 0, failed = 0, yoloTotal = 0;
       for (let i = 0; i < candidates.length; i++) {
         const record = candidates[i];
         let image = null, url = null;
@@ -2023,54 +2020,11 @@
           url = URL.createObjectURL(record.blob);
           image = new Image(); image.decoding = 'async'; image.src = url; await image.decode();
           const width = image.naturalWidth || image.width, height = image.naturalHeight || image.height;
-          const raw = [];
-
-          // COCO-SSD: three independent passes, retaining detections from every pass.
-          const cocoDetections = [];
-          for (let pass = 0; pass < passes; pass++) {
-            const predictions = await state.detectorModel.detect(image, 30, 0.10);
-            predictions.filter(item => String(item.class).toLowerCase() === 'bird' &&
-              Array.isArray(item.bbox) && item.bbox.length >= 4).forEach(item => {
-              const x = Math.max(0, Math.min(width, item.bbox[0]));
-              const y = Math.max(0, Math.min(height, item.bbox[1]));
-              const box = { x: x / width, y: y / height,
-                width: Math.max(0, Math.min(1 - x / width, item.bbox[2] / width)),
-                height: Math.max(0, Math.min(1 - y / height, item.bbox[3] / height)) };
-              if (box.width > 0 && box.height > 0) cocoDetections.push({ box, score: Number(item.score) || 0, pass, label: 'bird', source: 'coco-ssd' });
-            });
-            await new Promise(resolve => setTimeout(resolve, 0));
-          }
-          const cocoClusters = [];
-          cocoDetections.sort((a, b) => b.score - a.score);
-          for (const item of cocoDetections) {
-            let best = null, bestIoU = 0;
-            for (const cluster of cocoClusters) {
-              if (cluster.passSet.has(item.pass)) continue;
-              const iou = overlapRatio(cluster.box, item.box);
-              if (iou > 0.35 && iou > bestIoU) { best = cluster; bestIoU = iou; }
-            }
-            if (!best) cocoClusters.push({ box: { ...item.box }, score: item.score, members: [item], passSet: new Set([item.pass]) });
-            else {
-              best.members.push(item); best.passSet.add(item.pass);
-              const weight = best.members.reduce((sum, member) => sum + Math.max(0.05, member.score), 0);
-              for (const key of ['x', 'y', 'width', 'height']) {
-                best.box[key] = best.members.reduce((sum, member) => sum + member.box[key] * Math.max(0.05, member.score), 0) / weight;
-              }
-              best.score = best.members.reduce((sum, member) => sum + member.score, 0) / best.members.length;
-            }
-          }
-          cocoClusters.filter(cluster => cluster.passSet.size >= 2 || cluster.score >= 0.62)
-            .forEach(cluster => raw.push({ box: cluster.box, score: cluster.score,
-              label: 'bird', source: 'coco-ssd', support: cluster.passSet.size }));
-          cocoTotal += cocoClusters.length;
-
-          // The user's trained YOLO11 detector contributes species-specific boxes.
-          const yolo = await detectYoloOnImage(image);
-          raw.push(...yolo); yoloTotal += yolo.length;
-
-          // MobileNet example matcher independently scans overlapping regions.
-          const learned = await detectLearnedRegions(image);
-          raw.push(...learned); learnedTotal += learned.length;
+          // The trained YOLO11 model is the sole annotation source. Its output
+          // already contains class predictions and object coordinates, so do not
+          // require COCO-SSD or the separate MobileNet example matcher here.
+          const raw = await detectYoloOnImage(image);
+          yoloTotal += raw.length;
 
           // Fuse overlapping proposals across models. Keep strong single-model hits;
           // agreement raises confidence but is not required for a valid small bird.
@@ -2127,19 +2081,18 @@
         } finally { if (url) URL.revokeObjectURL(url); image = null; }
         if ((i + 1) % 100 === 0 || i + 1 === candidates.length) {
           $('importStatus').textContent = 'Checkpoint saved · ' + (i + 1) + '/' + candidates.length +
-            ' images · boxes ' + found + ' · COCO ' + cocoTotal + ' · YOLO ' + yoloTotal +
-            ' · learned scans ' + learnedTotal + ' · no boxes ' + missed + ' · errors ' + failed;
-          log('Three-model checkpoint: ' + (i + 1) + '/' + candidates.length + '. Completed annotations are already saved locally.');
+            ' images · boxes ' + found + ' · YOLO proposals ' + yoloTotal +
+            ' · no boxes ' + missed + ' · errors ' + failed;
+          log('YOLO auto-annotation checkpoint: ' + (i + 1) + '/' + candidates.length + '. Completed annotations are already saved locally.');
           renderLibrary();
         }
         await new Promise(resolve => setTimeout(resolve, 0));
       }
       const protectedCount = state.records.filter(protectedRecord).length;
-      $('importStatus').textContent = 'Ensemble finished: ' + found + ' boxes across ' + candidates.length +
-        ' images. COCO-SSD, trained YOLO11 and the WildlifeVision learned matcher all contributed. Review pending boxes.';
-      log('Three-model annotation complete: ' + found + ' boxes; COCO proposals ' + cocoTotal +
-        ', YOLO proposals ' + yoloTotal + ', learned-region proposals ' + learnedTotal +
-        '; ' + missed + ' images had no accepted boxes; ' + protectedCount +
+      $('importStatus').textContent = 'YOLO auto-annotation finished: ' + found + ' boxes across ' + candidates.length +
+        ' images. Review pending boxes before exporting the dataset.';
+      log('YOLO auto-annotation complete: ' + found + ' boxes from ' + yoloTotal +
+        ' YOLO proposals; ' + missed + ' images had no accepted boxes; ' + protectedCount +
         ' human-verified/manual images skipped; ' + failed + ' errors.');
       renderLibrary();
     } catch (error) {

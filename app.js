@@ -38,7 +38,7 @@
     maskMode: false, showMotion: true, showMasks: true, tracks: [], nextTrackId: 1,
     logs: [], db: null, records: [], duplicateCount: 0, editingId: null,
     objectURLs: new Map(), motionScore: 0, detectionMode: "ai", detectorModel: null, featureModel: null,
-    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, lastInferenceMs: 0, aiDetections: [], aiThreshold: 0.45, trainingSamples: [], trainingReady: false, hasSavedTraining: false, rfSession: null, rfLabels: YOLO_CLASS_NAMES.slice(), rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded", spatialTracks: [], nextSpatialId: 1, showSpatialGrid: true, showTrails: true, showCoordinates: true
+    aiBusy: false, aiLastRun: 0, lastLearnedScan: 0, lastInferenceMs: 0, aiDetections: [], aiThreshold: 0.51, trainingSamples: [], trainingReady: false, hasSavedTraining: false, rfSession: null, rfLabels: YOLO_CLASS_NAMES.slice(), rfModelName: "", rfInputSize: 560, rfBusy: false, rfProvider: "unloaded", spatialTracks: [], nextSpatialId: 1, showSpatialGrid: true, showTrails: true, showCoordinates: true
   };
 
   const video = $('cameraVideo');
@@ -392,13 +392,14 @@
     return union > 0 ? intersection / union : 0;
   }
 
-  function suppressYoloDuplicates(items, iouThreshold = 0.45, limit = 100) {
+  function suppressYoloDuplicates(items, iouThreshold = 0.35, limit = 20) {
     const sorted = items.slice().sort((a, b) => b.prediction.score - a.prediction.score);
     const kept = [];
     for (const candidate of sorted) {
       const box = candidate.prediction.bbox;
-      const label = candidate.prediction.class;
-      if (kept.some((chosen) => chosen.prediction.class === label &&
+      // Suppress overlapping boxes across classes too. One background patch
+      // must not become several bird species because class scores tie.
+      if (kept.some((chosen) =>
         yoloIoU(box, chosen.prediction.bbox) > iouThreshold)) continue;
       kept.push(candidate);
       if (kept.length >= limit) break;

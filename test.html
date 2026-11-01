@@ -77,21 +77,24 @@ $("run").addEventListener("click",async()=>{
   for(let a=0;a<anchors;a++){
    let score=-Infinity,classId=0;
    for(let c=0;c<classes;c++){const raw=at(a,c+4),conf=raw>=0&&raw<=1?raw:1/(1+Math.exp(-raw));if(conf>score){score=conf;classId=c;}}
-   if(score<threshold)continue;
    let cx=at(a,0),cy=at(a,1),w=at(a,2),h=at(a,3);
    if(Math.max(Math.abs(cx),Math.abs(cy),Math.abs(w),Math.abs(h))<=2){cx*=side;cy*=side;w*=side;h*=side;}
    const l=Math.max(0,Math.min(image.naturalWidth,(cx-w/2-ox)/scale)),top=Math.max(0,Math.min(image.naturalHeight,(cy-h/2-oy)/scale)),r=Math.max(0,Math.min(image.naturalWidth,(cx+w/2-ox)/scale)),bottom=Math.max(0,Math.min(image.naturalHeight,(cy+h/2-oy)/scale));
    if(cx<ox||cx>ox+dw||cy<oy||cy>oy+dh||r-l<3||bottom-top<3)continue;
-   candidates.push({box:[l,top,r-l,bottom-top],score,classId,label:labels[classId]||("class_"+classId),anchor:a});
+   const item={box:[l,top,r-l,bottom-top],score,classId,label:labels[classId]||("class_"+classId),anchor:a};
+   rawCandidates.push(item);
+   if(score>=threshold)candidates.push(item);
   }
   const kept=nms(candidates,Number($("iou").value)/100);
   ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0);
-  for(const d of kept){const [x,y,w,h]=d.box;ctx.lineWidth=Math.max(2,image.naturalWidth/700);ctx.strokeStyle="#d6b47a";ctx.strokeRect(x,y,w,h);const text=d.label+" "+(d.score*100).toFixed(1)+"%";ctx.font="bold "+Math.max(12,image.naturalWidth/90)+"px sans-serif";const th=Math.max(20,image.naturalWidth/35);ctx.fillStyle="#d6b47a";ctx.fillRect(x,Math.max(0,y-th),Math.min(canvas.width,ctx.measureText(text).width+12),th);ctx.fillStyle="#16130e";ctx.fillText(text,x+6,Math.max(13,y-th/2+5));}
+  const rawTop=rawCandidates.sort((a,b)=>b.score-a.score).slice(0,5);
+  const drawBox=(d,raw=false)=>{const [x,y,w,h]=d.box;ctx.save();ctx.lineWidth=Math.max(2,image.naturalWidth/700);ctx.strokeStyle=raw?"#72b7ff":"#d6b47a";if(raw)ctx.setLineDash([Math.max(5,image.naturalWidth/120),Math.max(3,image.naturalWidth/180)]);ctx.strokeRect(x,y,w,h);const text=(raw?"RAW · ":"")+d.label+" "+(d.score*100).toFixed(1)+"%";ctx.font="bold "+Math.max(12,image.naturalWidth/90)+"px sans-serif";const th=Math.max(20,image.naturalWidth/35);ctx.fillStyle=raw?"#72b7ff":"#d6b47a";ctx.fillRect(x,Math.max(0,y-th),Math.min(canvas.width,ctx.measureText(text).width+12),th);ctx.fillStyle="#101820";ctx.fillText(text,x+6,Math.max(13,y-th/2+5));ctx.restore();};
+  if(kept.length){for(const d of kept)drawBox(d);}else{for(const d of rawTop)drawBox(d,true);}
   const ms=(performance.now()-started).toFixed(1);
   $("shape").textContent=dims.join("×");$("rawCount").textContent=String(candidates.length);$("finalCount").textContent=String(kept.length);$("duration").textContent=ms+" ms";
-  const top=[...candidates].sort((a,b)=>b.score-a.score).slice(0,20);
-  $("details").textContent="Model: "+modelName+"\nImage: "+imageName+"\nInput: [1, 3, "+side+", "+side+"] RGB / 0–1, letterboxed\nOutput: "+dims.join(" × ")+"\nClasses: "+classes+" · Labels loaded: "+labels.length+"\nRaw output numeric range: "+min.toFixed(5)+" to "+max.toFixed(5)+"\nCandidates above threshold before NMS: "+candidates.length+"\nKept after class-agnostic NMS: "+kept.length+"\n\nTOP CANDIDATES BEFORE NMS\n"+(top.map((d,i)=>(i+1)+". "+d.label+" · "+(d.score*100).toFixed(2)+"% · anchor "+d.anchor+" · box "+d.box.map(v=>Math.round(v)).join(", ")).join("\n")||"None") ;
-  $("status").textContent="Finished in "+ms+" ms. Showing "+kept.length+" detections after NMS. This is model output, not verified bird identification.";
+  const top=rawTop.slice(0,20);
+  $("details").textContent="Model: "+modelName+"\nImage: "+imageName+"\nInput: [1, 3, "+side+", "+side+"] RGB / 0–1, letterboxed\nOutput: "+dims.join(" × ")+"\nClasses: "+classes+" · Labels loaded: "+labels.length+"\nRaw output numeric range: "+min.toFixed(5)+" to "+max.toFixed(5)+"\nCandidates above threshold before NMS: "+candidates.length+"\nKept after class-agnostic NMS: "+kept.length+"\n\nTOP RAW CANDIDATES (BELOW-THRESHOLD BOXES ARE DIAGNOSTIC ONLY)\n"+(top.map((d,i)=>(i+1)+". "+d.label+" · "+(d.score*100).toFixed(2)+"% · anchor "+d.anchor+" · box "+d.box.map(v=>Math.round(v)).join(", ")).join("\n")||"None") ;
+  $("status").textContent=kept.length?"Finished in "+ms+" ms. Showing "+kept.length+" detections after NMS. This is model output, not verified bird identification.":"Finished in "+ms+" ms. No boxes passed the confidence threshold. Showing up to "+rawTop.length+" highest-scoring raw boxes as dashed blue diagnostic overlays; they are not accepted detections.";
  }catch(err){$("status").textContent="Inference failed: "+err.message;$("details").textContent=err.stack||String(err);}
  finally{$("run").disabled=false;}
 });

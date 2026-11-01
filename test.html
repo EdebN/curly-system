@@ -76,7 +76,7 @@ $("run").addEventListener("click",async()=>{
   const candidates=[],rawCandidates=[],threshold=Number($("threshold").value)/100;
   for(let a=0;a<anchors;a++){
    let score=-Infinity,classId=0;
-   for(let c=0;c<classes;c++){const raw=at(a,c+4),conf=raw>=0&&raw<=1?raw:1/(1+Math.exp(-raw));if(conf>score){score=conf;classId=c;}}
+   for(let c=0;c<classes;c++){const raw=at(a,c+4),conf=Math.max(0,Math.min(1,raw));if(conf>score){score=conf;classId=c;}}
    let cx=at(a,0),cy=at(a,1),w=at(a,2),h=at(a,3);
    if(Math.max(Math.abs(cx),Math.abs(cy),Math.abs(w),Math.abs(h))<=2){cx*=side;cy*=side;w*=side;h*=side;}
    const l=Math.max(0,Math.min(image.naturalWidth,(cx-w/2-ox)/scale)),top=Math.max(0,Math.min(image.naturalHeight,(cy-h/2-oy)/scale)),r=Math.max(0,Math.min(image.naturalWidth,(cx+w/2-ox)/scale)),bottom=Math.max(0,Math.min(image.naturalHeight,(cy+h/2-oy)/scale));

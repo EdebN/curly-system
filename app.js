@@ -2008,10 +2008,15 @@
       return;
     }
     const button = $('autoAnnotate'); button.disabled = true;
+    const originalButtonText = button.textContent;
     yoloDatasetSaved = false;
     try {
       if (!state.rfSession) throw new Error('Load your trained YOLO11 ONNX model first. YOLO supplies both the species predictions and bounding boxes; the separate example matcher is not required.');
-      let found = 0, improved = 0, missed = 0, failed = 0, yoloTotal = 0;
+      let found = 0, missed = 0, failed = 0, yoloTotal = 0;
+      button.textContent = 'Starting YOLO…';
+      $('importStatus').textContent = 'Starting YOLO auto-annotation for ' + candidates.length + ' eligible images…';
+      log('YOLO auto-annotation started for ' + candidates.length + ' eligible image(s).');
+      await new Promise(resolve => requestAnimationFrame(() => resolve()));
       for (let i = 0; i < candidates.length; i++) {
         const record = candidates[i];
         let image = null, url = null;
@@ -2026,45 +2031,18 @@
           const raw = await detectYoloOnImage(image);
           yoloTotal += raw.length;
 
-          // Fuse overlapping proposals across models. Keep strong single-model hits;
-          // agreement raises confidence but is not required for a valid small bird.
-          raw.sort((a, b) => b.score - a.score);
-          const fused = [];
-          for (const item of raw) {
-            let best = null, bestIoU = 0;
-            for (const cluster of fused) {
-              const iou = overlapRatio(cluster.box, item.box);
-              if (iou > 0.30 && iou > bestIoU) { best = cluster; bestIoU = iou; }
-            }
-            if (!best) {
-              fused.push({ box: { ...item.box }, members: [item], sources: new Set([item.source]), score: item.score, label: item.label });
-            } else {
-              best.members.push(item); best.sources.add(item.source);
-              const weight = best.members.reduce((sum, member) => sum + Math.max(0.05, member.score), 0);
-              for (const key of ['x', 'y', 'width', 'height']) {
-                best.box[key] = best.members.reduce((sum, member) => sum + member.box[key] * Math.max(0.05, member.score), 0) / weight;
-              }
-              best.score = best.members.reduce((sum, member) => sum + member.score, 0) / best.members.length;
-              const strongestLabel = best.members.slice().sort((a, b) => b.score - a.score)[0];
-              if (strongestLabel.label && strongestLabel.label !== 'bird') best.label = strongestLabel.label;
-            }
-          }
-          const accepted = fused.filter(cluster => {
-            const sources = cluster.sources;
-            return sources.size >= 2 ||
-              (sources.has('yolo11-onnx') && cluster.members.some(item => item.source === 'yolo11-onnx' && item.score >= Math.max(0.28, state.aiThreshold * 0.8))) ||
-              (sources.has('coco-ssd') && cluster.members.some(item => item.source === 'coco-ssd' && item.score >= 0.68)) ||
-              (sources.has('wildlifevision-learned') && cluster.members.some(item => item.source === 'wildlifevision-learned' && item.score >= 0.72));
-          }).sort((a, b) => b.sources.size - a.sources.size || b.score - a.score).slice(0, 12);
-
-          const boxes = accepted.map(cluster => ({
-            box: cluster.box,
-            confidence: Math.min(0.99, cluster.sources.size > 1
-              ? cluster.score + 0.08 * (cluster.sources.size - 1) : cluster.score),
-            source: 'ensemble:' + [...cluster.sources].join('+'),
-            speciesLabel: cluster.label === 'bird' ? (record.speciesLabel || 'Unlabelled') : cluster.label,
-            review: 'pending'
-          }));
+          // YOLO is the only active proposal source. Apply the same confidence
+          // floor directly, rather than retaining dead ensemble/fusion branches.
+          const boxes = raw
+            .filter(item => item.score >= Math.max(0.28, state.aiThreshold * 0.8))
+            .slice(0, 12)
+            .map(item => ({
+              box: item.box,
+              confidence: Math.min(0.99, item.score),
+              source: 'yolo11-onnx',
+              speciesLabel: item.label || record.speciesLabel || 'Unlabelled',
+              review: 'pending'
+            }));
           if (boxes.length) {
             const previousCount = recordBoxes(record).length;
             record.boxes = boxes;
@@ -2079,26 +2057,33 @@
         } catch (error) {
           failed++; log('Ensemble auto-annotation failed for ' + record.filename + ': ' + error.message, 'warn');
         } finally { if (url) URL.revokeObjectURL(url); image = null; }
-        if ((i + 1) % 100 === 0 || i + 1 === candidates.length) {
-          $('importStatus').textContent = 'Checkpoint saved · ' + (i + 1) + '/' + candidates.length +
-            ' images · boxes ' + found + ' · YOLO proposals ' + yoloTotal +
-            ' · no boxes ' + missed + ' · errors ' + failed;
-          log('YOLO auto-annotation checkpoint: ' + (i + 1) + '/' + candidates.length + '. Completed annotations are already saved locally.');
+        const completed = i + 1;
+        button.textContent = 'Annotating ' + completed + '/' + candidates.length;
+        $('importStatus').textContent = 'YOLO auto-annotation · ' + completed + '/' + candidates.length +
+          ' images · boxes ' + found + ' · proposals ' + yoloTotal +
+          ' · no detections ' + missed + ' · errors ' + failed;
+        if (completed % 10 === 0 || completed === candidates.length) {
+          log('YOLO auto-annotation progress: ' + completed + '/' + candidates.length +
+            ' images; ' + found + ' boxes saved so far.');
           renderLibrary();
         }
         await new Promise(resolve => setTimeout(resolve, 0));
       }
       const protectedCount = state.records.filter(protectedRecord).length;
       $('importStatus').textContent = 'YOLO auto-annotation finished: ' + found + ' boxes across ' + candidates.length +
-        ' images. Review pending boxes before exporting the dataset.';
+        ' images. Review pending boxes before exporting the dataset. ' + missed + ' images had no accepted boxes; ' + failed + ' errors.';
+      button.textContent = 'Auto-generate Bounding Boxes';
       log('YOLO auto-annotation complete: ' + found + ' boxes from ' + yoloTotal +
         ' YOLO proposals; ' + missed + ' images had no accepted boxes; ' + protectedCount +
         ' human-verified/manual images skipped; ' + failed + ' errors.');
       renderLibrary();
     } catch (error) {
-      $('importStatus').textContent = 'Ensemble could not run: ' + error.message;
-      log('Three-model auto-annotation could not start: ' + error.message, 'error');
-    } finally { button.disabled = false; }
+      $('importStatus').textContent = 'YOLO auto-annotation could not run: ' + error.message;
+      log('YOLO auto-annotation could not run: ' + error.message, 'error');
+    } finally {
+      button.disabled = false;
+      button.textContent = originalButtonText;
+    }
   });
 
   let annotationDraft = [];

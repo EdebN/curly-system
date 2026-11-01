@@ -73,7 +73,7 @@ $("run").addEventListener("click",async()=>{
   const cf=dims[1]<dims[2],channels=cf?dims[1]:dims[2],anchors=cf?dims[2]:dims[1],classes=channels-4,values=out.data;
   const at=(a,c)=>cf?values[c*anchors+a]:values[a*channels+c];
   let min=Infinity,max=-Infinity;for(const v of values){if(v<min)min=v;if(v>max)max=v;}
-  const candidates=[],threshold=Number($("threshold").value)/100;
+  const candidates=[],rawCandidates=[],threshold=Number($("threshold").value)/100;
   for(let a=0;a<anchors;a++){
    let score=-Infinity,classId=0;
    for(let c=0;c<classes;c++){const raw=at(a,c+4),conf=raw>=0&&raw<=1?raw:1/(1+Math.exp(-raw));if(conf>score){score=conf;classId=c;}}

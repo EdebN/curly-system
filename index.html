@@ -181,7 +181,7 @@
           <option value="default">Default order</option><option value="uncertain">Most uncertain first · verified last</option><option value="confident">Most confident first · verified first</option><option value="unboxed">Missing boxes first</option>
         </select>
       </div>
-      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Review annotations and export dataset</h3><button id="exportYolo" class="button primary">Export YOLO dataset</button></div></div><p class="muted">Correct the bird boxes and mark them verified where possible. You can export before every image is verified; the app will warn you about unchecked boxes. Keep every photo uncropped. Label bird-free scenes exactly <strong>Background</strong> and clear all boxes. Background photos are exported with empty label files, not as a species class.</p></div>
+      <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 5 · REVIEW AND EXPORT</p><h3>Review annotations and export dataset</h3><button id="exportYolo" class="button primary">Export YOLO dataset</button></div></div><p class="muted">The export backs up every image in your library, including unlabelled and unreviewed photos. Only eligible labelled images enter the YOLO training folders; all other images are stored separately in the ZIP so they are preserved without becoming false negative training examples. Bounding boxes, labels, confidence and verification status are retained for re-import.</p></div>
       <div id="imageGrid" class="image-grid"><div class="empty-state">Import images to begin building your dataset.</div></div>
     </section>
 

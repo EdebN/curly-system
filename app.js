@@ -396,6 +396,7 @@
       state.rfSession = session;
       state.rfModelBytes = bytes.slice(0);
       state.rfModelName = file.name;
+      $('exportModel').disabled = false;
       const meta = session.inputMetadata && session.inputMetadata[session.inputNames[0]];
       const dims = meta && meta.dimensions;
       state.rfInputSize = dims && dims.length >= 4 && Number.isFinite(dims[2]) && dims[2] > 0 ? dims[2] : 640;
@@ -717,7 +718,7 @@
       }
       state.trainingReady = state.trainingSamples.length > 0;
       state.hasSavedTraining = state.trainingReady;
-      $('exportModel').disabled = !state.hasSavedTraining;
+      $('exportModel').disabled = !state.rfModelBytes;
       const labels = new Set(state.trainingSamples.map(sample => sample.label));
       $('classifierCapability').textContent = state.trainingReady ? labels.size + ' species learned' : 'Not trained';
       $('classifierCapability').className = state.trainingReady ? 'good' : 'warn';

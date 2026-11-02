@@ -2091,7 +2091,7 @@
     $('removeLastAnnotation').disabled = boxes.length === 0;
   }
   function editRecord(id) {
-    const record = state.records.find((item) => item.id === id);
+    const record = state.records.find(item => item.id === id);
     if (!record) return;
     state.editingId = id;
     annotationDraft = normaliseRecordBoxes(record);
@@ -2099,9 +2099,63 @@
     $('editPreview').src = imageURL(record);
     $('editLabel').value = record.speciesLabel;
     $('editSplit').value = record.split;
+    updateEditorNavigation();
     $('editDialog').showModal();
     if ($('editPreview').complete) paintAnnotation();
   }
+  function editorRecords() { return visibleLibraryRecords(); }
+  function updateEditorNavigation() {
+    const records = editorRecords(), index = records.findIndex(record => record.id === state.editingId);
+    $('editorPosition').textContent = index < 0 ? 'Image unavailable' : (index + 1) + ' / ' + records.length;
+    $('previousEditImage').disabled = index <= 0;
+    $('nextEditImage').disabled = index < 0 || index >= records.length - 1;
+  }
+  async function saveEditedRecord() {
+    const record = state.records.find(item => item.id === state.editingId);
+    if (!record) return false;
+    if (annotationCurrent && annotationCurrent.box.width >= 0.01 && annotationCurrent.box.height >= 0.01) annotationDraft.push(annotationCurrent);
+    annotationCurrent = null; annotationDrag = null;
+    record.speciesLabel = $('editLabel').value.trim() || 'Unlabelled';
+    record.split = $('editSplit').value;
+    yoloDatasetSaved = false;
+    record.boxes = annotationDraft.map(item => ({box:{...item.box},confidence:isHumanVerifiedBox(item)?1.01:(item.confidence??1),source:item.source||'manual',review:isHumanVerifiedBox(item)?'verified':(item.review||'pending')}));
+    record.box = record.boxes.length ? {...record.boxes[0].box} : null;
+    record.boxConfidence = record.boxes.length ? record.boxes[0].confidence : null;
+    record.boxSource = record.boxes.length ? record.boxes[0].source : null;
+    record.boxReview = record.boxes.length ? record.boxes[0].review : null;
+    try {
+      await dbRequest('readwrite', store => store.put(record));
+      $('importStatus').textContent = 'Record saved.';
+      log('Autosaved ' + record.filename + ' (' + record.boxes.length + ' boxes).');
+      return true;
+    } catch(error) { $('importStatus').textContent='Could not save: '+error.message; log('Could not save record: '+error.message,'error'); return false; }
+  }
+  async function moveEditor(delta) {
+    const records=editorRecords(), index=records.findIndex(record=>record.id===state.editingId), next=records[index+delta];
+    if(!next || !await saveEditedRecord()) return;
+    editRecord(next.id);
+  }
+  $('previousEditImage').addEventListener('click',()=>moveEditor(-1));
+  $('nextEditImage').addEventListener('click',()=>moveEditor(1));
+  $('deleteReferenceImage').addEventListener('click',async()=>{
+    const record=state.records.find(item=>item.id===state.editingId);
+    if(!record || !confirm('Permanently delete "'+record.filename+'" and its annotations from this browser library? This cannot be undone.')) return;
+    try {
+      await dbRequest('readwrite',store=>store.delete(record.id));
+      const url=state.objectURLs.get(record.id); if(url) URL.revokeObjectURL(url); state.objectURLs.delete(record.id);
+      const recordsBefore=editorRecords(), index=recordsBefore.findIndex(item=>item.id===record.id);
+      state.records=state.records.filter(item=>item.id!==record.id); selectedRecords.delete(record.id); yoloDatasetSaved=false;
+      const remaining=editorRecords(), next=remaining[Math.min(index,remaining.length-1)];
+      renderLibrary();
+      if(next) editRecord(next.id); else $('editDialog').close();
+      $('importStatus').textContent='Reference image deleted.'; log('Deleted reference image '+record.filename+'.','warn');
+    } catch(error) { $('importStatus').textContent='Could not delete image: '+error.message; log('Could not delete image: '+error.message,'error'); }
+  });
+  document.addEventListener('keydown',event=>{
+    if(!$('editDialog').open || ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+    if(event.key==='ArrowLeft'){event.preventDefault();moveEditor(-1);}
+    if(event.key==='ArrowRight'){event.preventDefault();moveEditor(1);}
+  });
   $('editPreview').addEventListener('load', paintAnnotation);
   $('annotationCanvas').addEventListener('pointerdown', event => {
     
@@ -2139,33 +2193,10 @@
   $('clearAnnotation').addEventListener('click', () => { annotationDraft = []; annotationCurrent = null; paintAnnotation(); });
   $('removeLastAnnotation').addEventListener('click', () => { annotationDraft.pop(); paintAnnotation(); });
 
-  $('editForm').addEventListener('submit', async (event) => {
-    if (event.submitter && event.submitter.value !== 'save') return;
+  $('editForm').addEventListener('submit', async event => {
+    if(event.submitter && event.submitter.value!=='save') return;
     event.preventDefault();
-    const record = state.records.find((item) => item.id === state.editingId);
-    if (!record) return;
-    record.speciesLabel = $('editLabel').value.trim() || 'Unlabelled';
-    record.split = $('editSplit').value;
-    yoloDatasetSaved = false;
-    record.boxes = annotationDraft.map(item => ({
-      box: { ...item.box },
-      confidence: isHumanVerifiedBox(item) ? 1.01 : (item.confidence ?? 1),
-      source: item.source || 'manual',
-      review: isHumanVerifiedBox(item) ? 'verified' : (item.review || 'pending')
-    }));
-    record.box = record.boxes.length ? { ...record.boxes[0].box } : null;
-    record.boxConfidence = record.boxes.length ? record.boxes[0].confidence : null;
-    record.boxSource = record.boxes.length ? record.boxes[0].source : null;
-    record.boxReview = record.boxes.length ? record.boxes[0].review : null;
-    try {
-      await dbRequest('readwrite', (store) => store.put(record));
-      $('editDialog').close();
-      renderLibrary();
-      $('importStatus').textContent = 'Record saved.';
-      log('Updated record ' + record.filename + ': label="' + record.speciesLabel + '", split=' + record.split + '.');
-    } catch (error) {
-      log('Could not save record: ' + error.message, 'error');
-    }
+    if(await saveEditedRecord()){ $('editDialog').close(); renderLibrary(); }
   });
 
   function csvEscape(value) { return '"' + String(value == null ? '' : value).replace(/"/g, '""') + '"'; }

@@ -348,68 +348,111 @@
   }
 
 
+  function yoloEnginePreference() {
+    return $('rfEngine') ? $('rfEngine').value : 'auto';
+  }
+
+  async function createYoloRuntimeSession(bytes, preference) {
+    if (!window.ort || !window.ort.InferenceSession) {
+      throw new Error('ONNX Runtime Web did not load. Check internet access and reload.');
+    }
+    if (window.ort.env && window.ort.env.wasm) {
+      // Keep the CPU fallback predictable on iPad memory budgets.
+      window.ort.env.wasm.numThreads = 1;
+      window.ort.env.wasm.proxy = false;
+    }
+    const options = {
+      graphOptimizationLevel: 'all',
+      executionMode: 'sequential',
+      enableCpuMemArena: false,
+      enableMemPattern: false
+    };
+    const webgpuAvailable = !!(navigator.gpu && window.ort.env && window.ort.env.webgpu);
+    const tryWebGPU = preference === 'webgpu' || (preference === 'auto' && webgpuAvailable);
+    if (preference === 'webgpu' && !webgpuAvailable) {
+      throw new Error('WebGPU is unavailable in this browser. Use Automatic or Standard CPU instead.');
+    }
+    if (tryWebGPU) {
+      try {
+        const session = await window.ort.InferenceSession.create(bytes, {
+          ...options,
+          executionProviders: ['webgpu', 'wasm']
+        });
+        return { session, provider: 'WebGPU (Apple Metal where exposed by Safari)' };
+      } catch (gpuError) {
+        if (preference === 'webgpu') throw gpuError;
+        log('WebGPU initialisation failed; falling back to low-memory WASM: ' + gpuError.message, 'warn');
+      }
+    }
+    const session = await window.ort.InferenceSession.create(bytes, {
+      ...options,
+      executionProviders: ['wasm']
+    });
+    return { session, provider: 'WASM (CPU fallback)' };
+  }
+
+  async function installYoloRuntime(bytes, modelName, preference) {
+    const result = await createYoloRuntimeSession(bytes, preference);
+    const previousSession = state.rfSession;
+    state.rfSession = result.session;
+    state.rfProvider = result.provider;
+    state.rfModelBytes = bytes.slice(0);
+    state.rfModelName = modelName;
+    const meta = result.session.inputMetadata && result.session.inputMetadata[result.session.inputNames[0]];
+    const dims = meta && meta.dimensions;
+    state.rfInputSize = dims && dims.length >= 4 && Number.isFinite(dims[2]) && dims[2] > 0 ? dims[2] : 640;
+    if (previousSession && previousSession !== result.session && typeof previousSession.release === 'function') {
+      try { await previousSession.release(); } catch (error) { log('Previous ONNX session cleanup warning: ' + error.message, 'warn'); }
+    }
+    state.detectionMode = 'yolo';
+    $('rfMode').className = 'button primary'; $('aiMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
+    $('rfStatus').textContent = 'Loaded ' + modelName + ' · ' + state.rfInputSize + 'px · ' + state.rfProvider + '. ' + state.rfLabels.length + ' labels.';
+    $('detectorCapability').textContent = 'YOLO11 ready'; $('detectorCapability').className = 'good';
+    $('modelReadout').textContent = 'YOLO11';
+    log('YOLO ONNX ready: ' + modelName + '; engine=' + state.rfProvider + '; inputs=' + result.session.inputNames.join(',') + '; outputs=' + result.session.outputNames.join(',') + '.');
+    $('aiStatus').textContent = 'YOLO11 detector ready. Start the camera or use a known test image.';
+  }
+
   async function loadYoloOnnxModel(fileOverride) {
     const file = fileOverride || ($('rfModelPicker').files && $('rfModelPicker').files[0]);
     if (!file) { $('rfStatus').textContent = 'Choose your trained YOLO11 .onnx file first.'; return; }
-    if (!window.ort || !window.ort.InferenceSession) throw new Error('ONNX Runtime Web did not load. Check internet access and reload.');
     $('loadRfDetr').disabled = true;
-    $('rfStatus').textContent = 'Loading YOLO model into browser memory…';
+    $('rfEngine').disabled = true;
+    $('rfStatus').textContent = 'Loading YOLO model…';
     try {
       const bytes = await file.arrayBuffer();
-      let session;
-      const canUseWebGPU = !!(navigator.gpu && window.ort.env && window.ort.env.webgpu);
-      if (window.ort.env && window.ort.env.wasm) {
-        // Keep Safari/iPad's WASM heap predictable. Multiple worker threads and
-        // memory arenas can multiply peak memory during session initialisation.
-        window.ort.env.wasm.numThreads = 1;
-        window.ort.env.wasm.proxy = false;
-      }
-      const lowMemoryOptions = {
-        graphOptimizationLevel: 'basic',
-        executionMode: 'sequential',
-        enableCpuMemArena: false,
-        enableMemPattern: false
-      };
-      if (canUseWebGPU) {
-        try {
-          session = await window.ort.InferenceSession.create(bytes, {
-            ...lowMemoryOptions,
-            executionProviders: ['webgpu']
-          });
-          state.rfProvider = 'WebGPU';
-        } catch (gpuError) {
-          log('WebGPU unavailable; trying single-threaded low-memory WASM: ' + gpuError.message, 'warn');
-        }
-      }
-      if (!session) {
-        try {
-          session = await window.ort.InferenceSession.create(bytes, {
-            ...lowMemoryOptions,
-            executionProviders: ['wasm']
-          });
-          state.rfProvider = 'WASM (low-memory)';
-        } catch (wasmError) {
-          const detail = wasmError && wasmError.message ? wasmError.message : String(wasmError);
-          throw new Error('The browser ran out of memory while loading this ONNX model. Close other heavy tabs and reload WildlifeVision. If this keeps happening, use a device/browser with more available memory. Runtime detail: ' + detail);
-        }
-      }
-      state.rfSession = session;
-      state.rfModelBytes = bytes.slice(0);
-      state.rfModelName = file.name;
-      const meta = session.inputMetadata && session.inputMetadata[session.inputNames[0]];
-      const dims = meta && meta.dimensions;
-      state.rfInputSize = dims && dims.length >= 4 && Number.isFinite(dims[2]) && dims[2] > 0 ? dims[2] : 640;
-      state.detectionMode = 'yolo';
-      $('rfMode').className = 'button primary'; $('aiMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
-      $('rfStatus').textContent = 'Loaded ' + file.name + ' · ' + state.rfInputSize + 'px input · ' + state.rfProvider + '. Default labels: ' + state.rfLabels.length + ' classes.';
-      $('detectorCapability').textContent = 'YOLO11 ready'; $('detectorCapability').className = 'good';
-      $('modelReadout').textContent = 'YOLO11';
-      log('YOLO ONNX loaded: ' + file.name + '; inputs=' + session.inputNames.join(',') + '; outputs=' + session.outputNames.join(',') + '.');
-      $('aiStatus').textContent = 'YOLO11 detector ready. Start the camera or use a known test image.';
+      await installYoloRuntime(bytes, file.name, yoloEnginePreference());
     } catch (error) {
-      state.rfSession = null; $('rfStatus').textContent = 'YOLO model load failed: ' + error.message;
-      log('YOLO ONNX load failed: ' + error.message, 'error'); throw error;
-    } finally { $('loadRfDetr').disabled = false; }
+      $('rfStatus').textContent = 'YOLO model load failed: ' + error.message;
+      log('YOLO ONNX load failed: ' + error.message, 'error');
+      throw error;
+    } finally {
+      $('loadRfDetr').disabled = false;
+      $('rfEngine').disabled = false;
+    }
+  }
+
+  async function switchYoloEngine() {
+    if (!state.rfModelBytes || !state.rfModelName) {
+      $('rfStatus').textContent = 'Choose and load your ONNX model before changing its engine.';
+      return;
+    }
+    $('rfEngine').disabled = true;
+    $('loadRfDetr').disabled = true;
+    $('rfStatus').textContent = 'Switching ONNX engine…';
+    try {
+      await installYoloRuntime(state.rfModelBytes, state.rfModelName, yoloEnginePreference());
+      log('ONNX engine changed to ' + state.rfProvider + '.');
+    } catch (error) {
+      $('rfStatus').textContent = 'Engine switch failed; previous engine remains active. ' + error.message;
+      log('ONNX engine switch failed: ' + error.message, 'error');
+      // Restore the selector to the currently active provider when a requested
+      // backend cannot initialise, so the UI never misrepresents the active engine.
+      $('rfEngine').value = state.rfProvider.indexOf('WebGPU') === 0 ? 'webgpu' : 'wasm';
+    } finally {
+      $('rfEngine').disabled = false;
+      $('loadRfDetr').disabled = false;
+    }
   }
 
   function yoloIoU(a, b) {
@@ -1267,6 +1310,7 @@
   });
   $('loadAI').addEventListener('click', () => loadAIModels().catch((error) => log('AI load error: ' + error.message, 'error')));
   $('loadRfDetr').addEventListener('click', () => loadYoloOnnxModel().catch((error) => log('YOLO11 load error: ' + error.message, 'error')));
+  $('rfEngine').addEventListener('change', switchYoloEngine);
   $('rfLabelsPicker').addEventListener('change', async (event) => {
     const file = event.target.files && event.target.files[0]; if (!file) return;
     try {

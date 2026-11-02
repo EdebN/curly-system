@@ -396,7 +396,6 @@
       state.rfSession = session;
       state.rfModelBytes = bytes.slice(0);
       state.rfModelName = file.name;
-      $('exportModel').disabled = false;
       const meta = session.inputMetadata && session.inputMetadata[session.inputNames[0]];
       const dims = meta && meta.dimensions;
       state.rfInputSize = dims && dims.length >= 4 && Number.isFinite(dims[2]) && dims[2] > 0 ? dims[2] : 640;
@@ -607,45 +606,7 @@
     }
   }
 
-  async function exportYoloModel() {
-    try {
-      if (!state.rfModelBytes || !state.rfSession) {
-        $('importStatus').textContent = 'Load a trained YOLO11 model first, then export it here.';
-        return;
-      }
-      if (!window.JSZip) throw new Error('ZIP support did not load. Reload WildlifeVision and try again.');
-      const zip = new window.JSZip();
-      const labels = state.rfLabels.slice();
-      const manifest = {
-        format: 'wildlifevision-yolo-model',
-        version: 1,
-        modelFile: 'model.onnx',
-        labelsFile: 'labels.json',
-        modelName: state.rfModelName || 'model.onnx',
-        inputSize: state.rfInputSize || 640,
-        classCount: labels.length,
-        exportedAt: new Date().toISOString()
-      };
-      zip.file('model.onnx', state.rfModelBytes);
-      zip.file('labels.json', JSON.stringify({ names: labels }, null, 2));
-      zip.file('manifest.json', JSON.stringify(manifest, null, 2));
-      const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 1 } });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'wildlifevision-yolo-model.wvmodel';
-      document.body.append(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1500);
-      $('importStatus').textContent = 'Exported YOLO model package with ' + labels.length + ' class labels. Import this .wvmodel file on another device.';
-      $('rfStatus').textContent = 'YOLO model package exported: model weights + class labels.';
-      log('Exported portable YOLO model package: ' + state.rfModelName + ' (' + labels.length + ' labels).');
-    } catch (error) {
-      $('importStatus').textContent = 'YOLO model export failed: ' + error.message;
-      log('YOLO model export failed: ' + error.message, 'error');
-    }
-  }
+
 
   async function trainSpeciesMatcher() {
     const labelled = state.records.filter((record) => record.speciesLabel && !['Unlabelled', 'Unknown'].includes(record.speciesLabel.trim()));
@@ -680,7 +641,6 @@
       if (!pending.length) {
         state.trainingReady = state.trainingSamples.length > 0;
         state.hasSavedTraining = state.trainingReady;
-        $('exportModel').disabled = !state.rfModelBytes;
         $('importStatus').textContent = 'No new labelled photos to learn. Existing model: ' + state.trainingSamples.length + ' examples.';
         return;
       }
@@ -718,7 +678,6 @@
       }
       state.trainingReady = state.trainingSamples.length > 0;
       state.hasSavedTraining = state.trainingReady;
-      $('exportModel').disabled = !state.rfModelBytes;
       const labels = new Set(state.trainingSamples.map(sample => sample.label));
       $('classifierCapability').textContent = state.trainingReady ? labels.size + ' species learned' : 'Not trained';
       $('classifierCapability').className = state.trainingReady ? 'good' : 'warn';
@@ -1324,45 +1283,7 @@
     state.lastFrame = null; log('Detection mode changed to trained YOLO11 ONNX.');
   });
   $('trainSpecies').addEventListener('click', trainSpeciesMatcher);
-  $('exportModel').addEventListener('click', exportYoloModel);
-  $('modelPicker').addEventListener('change', async (event) => {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-    try {
-      if (!window.JSZip) throw new Error('ZIP support did not load. Reload WildlifeVision and try again.');
-      $('importStatus').textContent = 'Opening YOLO model package…';
-      const zip = await window.JSZip.loadAsync(file);
-      const manifestEntry = zip.file('manifest.json');
-      const modelEntry = zip.file('model.onnx');
-      const labelsEntry = zip.file('labels.json');
-      if (!manifestEntry || !modelEntry || !labelsEntry) {
-        throw new Error('This is not a complete WildlifeVision .wvmodel package. It must contain model.onnx, labels.json and manifest.json.');
-      }
-      const manifest = JSON.parse(await manifestEntry.async('string'));
-      if (manifest.format !== 'wildlifevision-yolo-model' || manifest.version !== 1 ||
-          manifest.modelFile !== 'model.onnx' || manifest.labelsFile !== 'labels.json') {
-        throw new Error('Unsupported WildlifeVision YOLO model package or version.');
-      }
-      const labelData = JSON.parse(await labelsEntry.async('string'));
-      const labels = Array.isArray(labelData) ? labelData : labelData.names;
-      if (!Array.isArray(labels) || !labels.length || !labels.every(label => typeof label === 'string' && label.trim())) {
-        throw new Error('The package has an invalid class-label list.');
-      }
-      const onnxBlob = await modelEntry.async('blob');
-      state.rfLabels = labels;
-      $('rfLabelsName').textContent = file.name + ' · ' + labels.length + ' labels';
-      const modelFile = new File([onnxBlob], manifest.modelName || 'model.onnx', { type: 'application/onnx' });
-      await loadYoloOnnxModel(modelFile);
-      $('importStatus').textContent = 'Imported YOLO model: ' + labels.length + ' classes · ' + (manifest.inputSize || state.rfInputSize) + 'px input. Model and labels are ready.';
-      log('Imported complete YOLO model package: ' + file.name + ' (' + labels.length + ' classes).');
-    } catch (error) {
-      $('importStatus').textContent = 'YOLO model import failed: ' + error.message;
-      $('rfStatus').textContent = 'Model package import failed: ' + error.message;
-      log('YOLO model package import failed: ' + error.message, 'error');
-    } finally {
-      event.target.value = '';
-    }
-  });
+
   $('aiMode').addEventListener('click', () => {
     state.detectionMode = 'ai';
     $('aiMode').className = 'button primary'; $('rfMode').className = 'button secondary'; $('motionMode').className = 'button secondary';
@@ -1793,7 +1714,6 @@
       ? unverifiedCount + ' image(s) still have boxes awaiting verification. You will be asked before exporting them.'
       : 'Save the current YOLO dataset ZIP.';
     $('trainYoloColab').disabled = false;
-    $('exportModel').disabled = !state.rfModelBytes;
     $('clearLibrary').disabled = !state.records.length;
     selectedRecords.forEach((id) => { if (!state.records.some((record) => record.id === id)) selectedRecords.delete(id); });
     const root = $('imageGrid'); root.replaceChildren();
@@ -2449,7 +2369,6 @@
       await loadRecords();
       const savedTraining = await trainingStoreRequest('readonly', store => store.get('speciesMatcher'));
       state.hasSavedTraining = !!(savedTraining && Array.isArray(savedTraining.samples) && savedTraining.samples.length);
-      $('exportModel').disabled = !state.hasSavedTraining;
       if (state.hasSavedTraining) log('Saved learned model found locally: ' + savedTraining.samples.length + ' examples. Ready to export.');
       $('storageLabel').textContent = 'Ready';
       setCameraCapability('Not started', 'neutral');

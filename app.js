@@ -1461,7 +1461,7 @@
   }
   function isImageFile(file, path) {
     const name = (path || file.name || '').toLowerCase();
-    return (file.type && file.type.startsWith('image/')) || /\\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(name);
+    return (file.type && file.type.startsWith('image/')) || /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(name);
   }
 
   async function importFiles(fileList, folderMode) {
@@ -1590,7 +1590,7 @@
         const entry = entries[i];
         const blob = await entry.async('blob');
         const filename = entry.name.split('/').pop();
-        const mime = /\\.jpe?g$/i.test(filename) ? 'image/jpeg' : /\\.png$/i.test(filename) ? 'image/png' : /\\.webp$/i.test(filename) ? 'image/webp' : /\\.heic$/i.test(filename) ? 'image/heic' : /\\.heif$/i.test(filename) ? 'image/heif' : /\\.gif$/i.test(filename) ? 'image/gif' : 'application/octet-stream';
+        const mime = /\.jpe?g$/i.test(filename) ? 'image/jpeg' : /\.png$/i.test(filename) ? 'image/png' : /\.webp$/i.test(filename) ? 'image/webp' : /\.heic$/i.test(filename) ? 'image/heic' : /\.heif$/i.test(filename) ? 'image/heif' : /\.gif$/i.test(filename) ? 'image/gif' : 'application/octet-stream';
         items.push({file: new File([blob], filename, {type: mime, lastModified: file.lastModified}), relativePath: entry.name});
         if (i % 20 === 0) $('importStatus').textContent = 'Extracting ' + (i + 1) + ' of ' + entries.length + '…';
       }

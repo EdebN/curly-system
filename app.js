@@ -1523,7 +1523,7 @@
         if (manifest.format !== 'wildlifevision-yolo-roundtrip' || manifest.version !== 1 || !Array.isArray(manifest.records)) {
           throw new Error('The WildlifeVision metadata file has an unsupported format or version.');
         }
-        const imageEntries = Object.values(zip.files).filter(entry => !entry.dir && entry.name.startsWith('images/') && isImageFile({name: entry.name, type: ''}, entry.name));
+        const imageEntries = Object.values(zip.files).filter(entry => !entry.dir && isImageFile({name: entry.name, type: ''}, entry.name));
         const byPath = new Map(imageEntries.map(entry => [entry.name, entry]));
         const existingHashes = new Set(state.records.map(record => record.sha256).filter(Boolean));
         let restored = 0, duplicates = 0, missing = 0, failed = 0;
@@ -2297,6 +2297,48 @@
           written++;
         }
       }
+      // Back up every remaining library image as well. These live outside images/ so
+      // unlabelled or not-yet-reviewed photos are not mistaken for YOLO negative examples.
+      const exportedIds = new Set(roundTripRecords.map(item => item.id).filter(Boolean));
+      const allExportedIds = new Set();
+      for (const record of splitBuckets.train.concat(splitBuckets.val, splitBuckets.test)) allExportedIds.add(record.id);
+      let backupWritten = 0;
+      const backupRecords = state.records.filter(record => !allExportedIds.has(record.id));
+      for (let i = 0; i < backupRecords.length; i++) {
+        const record = backupRecords[i];
+        const stem = String(record.id).replace(/[^a-zA-Z0-9_-]/g,'_');
+        const extension = /\.(png|webp|jpe?g|gif|heic|heif|avif|tiff?|bmp)$/i.exec(record.filename);
+        const ext = extension ? extension[0].toLowerCase() : '.jpg';
+        if (!record.blob || typeof record.blob.arrayBuffer !== 'function') {
+          throw new Error('Image data is missing or unreadable for "' + (record.filename || stem) + '". Re-import that image before exporting.');
+        }
+        const imageBytes = new Uint8Array(await record.blob.arrayBuffer());
+        if (!imageBytes.byteLength) throw new Error('Image "' + (record.filename || stem) + '" is empty.');
+        const imagePath = 'library/' + stem + ext;
+        zip.file(imagePath, imageBytes);
+        const recordBoxesForExport = recordBoxes(record);
+        roundTripRecords.push({
+          imagePath,
+          filename: record.filename,
+          sourceName: record.sourceName || record.filename,
+          relativePath: record.relativePath || record.filename,
+          speciesLabel: record.speciesLabel || 'Unlabelled',
+          split: record.split || 'unassigned',
+          sha256: record.sha256 || null,
+          boxes: recordBoxesForExport.map(item => ({
+            box: { ...item.box },
+            confidence: item.confidence ?? 1,
+            source: item.source || 'legacy',
+            review: item.review || 'pending',
+            speciesLabel: item.speciesLabel || record.speciesLabel || 'Unlabelled'
+          }))
+        });
+        backupWritten++;
+        if (i % 20 === 0) {
+          $('importStatus').textContent = 'Backing up remaining library images ' + (i + 1) + '/' + backupRecords.length + '…';
+          await new Promise(resolve => setTimeout(resolve, 0));
+        }
+      }
       // This sidecar preserves review metadata that standard YOLO TXT labels cannot represent.
       zip.file('wildlifevision-metadata.json', JSON.stringify({
         format: 'wildlifevision-yolo-roundtrip',
@@ -2320,8 +2362,8 @@
       const skippedBackgroundNote = backgroundsWithBoxes.length
         ? ' ' + backgroundsWithBoxes.length + ' Background-labelled image(s) were skipped because they still contain boxes; edit them and clear all boxes to export them as negatives.'
         : '';
-      $('importStatus').textContent = 'Saved ' + written + ' full-resolution original images (' + backgrounds.length + ' background examples) across ' + classes.length + ' bird species.' + skippedBackgroundNote + ' The ZIP is ready for Colab.';
-      log('Reviewed YOLO dataset ZIP saved: ' + written + ' original images, including ' + backgrounds.length + ' background examples; ' + backgroundsWithBoxes.length + ' background-labelled images with boxes skipped; ' + classes.length + ' bird classes.');
+      $('importStatus').textContent = 'Saved ' + (written + backupWritten) + ' full-resolution library images (' + written + ' YOLO training images, ' + backupWritten + ' additional library images) across ' + classes.length + ' bird species.' + skippedBackgroundNote + ' The ZIP is ready for Colab.';
+      log('Full-library YOLO ZIP saved: ' + (written + backupWritten) + ' images total (' + written + ' training, ' + backupWritten + ' archive-only); including ' + backgrounds.length + ' background examples; ' + backgroundsWithBoxes.length + ' background-labelled images with boxes skipped; ' + classes.length + ' bird classes.');
       renderLibrary();
     } catch (error) {
       $('importStatus').textContent = 'YOLO export failed: ' + error.message;

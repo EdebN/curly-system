@@ -208,14 +208,14 @@
   </dialog>
   <dialog id="editDialog" class="edit-dialog">
     <form method="dialog" id="editForm">
-      <div class="dialog-heading"><div><p class="eyebrow">DATASET REVIEW</p><h2>Edit image record</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <div class="dialog-heading"><div><p class="eyebrow">DATASET REVIEW</p><h2>Edit image record</h2><p id="editorPosition" class="helper">1 / 1</p></div><div class="editor-nav"><button id="previousEditImage" type="button" class="button tiny secondary" aria-label="Previous image">←</button><button id="nextEditImage" type="button" class="button tiny secondary" aria-label="Next image">→</button><button class="icon-button" value="cancel" aria-label="Close">×</button></div></div>
       <div class="annotation-wrap"><img id="editPreview" class="edit-preview" alt="Selected dataset image"><canvas id="annotationCanvas" aria-label="Draw bird bounding boxes"></canvas></div>
       <p class="helper">Draw around every bird separately. Add as many boxes as the image needs, including multiple birds of the same species. Manually drawn boxes are marked as 101% certain.</p>
       <div class="annotation-actions"><button id="verifyAnnotations" type="button" class="button tiny secondary" disabled>Mark verified</button><button id="clearAnnotation" type="button" class="button tiny secondary">Clear all</button><button id="removeLastAnnotation" type="button" class="button tiny secondary" disabled>Remove last</button><span id="annotationStatus" class="helper">Uncertainty: —</span></div>
       <label class="form-label" for="editLabel">Species label</label><input id="editLabel" class="text-input" maxlength="120" placeholder="e.g. Australian magpie">
       <label class="form-label" for="editSplit">Dataset split</label><select id="editSplit" class="select-input"><option value="unassigned">Unassigned</option><option value="train">Train</option><option value="validation">Validation</option><option value="test">Test</option></select>
       <p class="helper">The species matcher learns visual examples from your labelled photos in this browser. It does not update the underlying detector weights; correct labels and varied examples improve matching.</p>
-      <div class="dialog-actions"><button value="cancel" class="button secondary">Cancel</button><button id="saveRecord" value="save" class="button primary">Save changes</button></div>
+      <div class="dialog-actions editor-dialog-actions"><button id="deleteReferenceImage" type="button" class="button danger-outline">Delete reference image</button><span class="helper">Autosaves when moving between images.</span><button value="cancel" class="button secondary">Close</button><button id="saveRecord" value="save" class="button primary">Save changes</button></div>
     </form>
   </dialog>
   <footer><span>WILDLIFE VISION</span><span>LOCAL AI · EXAMPLE-BASED SPECIES MATCHING · OPTIONAL MOTION</span></footer>

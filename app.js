@@ -498,7 +498,138 @@
   let yoloCameraTensor = null;
   const yoloByteToFloat = Float32Array.from({ length: 256 }, (_, value) => value / 255);
 
+  // GPU preprocessing keeps camera pixels on the same WebGPU device as ONNX Runtime.
+  // Safari's WebGPU implementation uses Metal on supported Macs. If any required
+  // capability is missing, the established CPU canvas path remains the fallback.
+  let yoloGpuDevice = null;
+  let yoloGpuPipeline = null;
+  let yoloGpuTexture = null;
+  let yoloGpuTextureWidth = 0;
+  let yoloGpuTextureHeight = 0;
+  let yoloGpuInputBuffer = null;
+  let yoloGpuInputTensor = null;
+  let yoloGpuParamsBuffer = null;
+  let yoloGpuBindGroup = null;
+  let yoloGpuSide = 0;
+  let yoloGpuDisabled = false;
+  let yoloGpuLogged = false;
+
   const yoloStageSamples = [];
+
+  async function prepareYoloGpuPreprocessor(side) {
+    if (yoloGpuDisabled || !state.rfProvider.toLowerCase().includes('webgpu')) return false;
+    const ort = window.ort;
+    const device = ort && ort.env && ort.env.webgpu && ort.env.webgpu.device;
+    if (!device || !ort.Tensor || typeof ort.Tensor.fromGpuBuffer !== 'function' ||
+        typeof device.importExternalTexture !== 'function' ||
+        typeof device.queue.copyExternalImageToTexture !== 'function') return false;
+
+    try {
+      if (yoloGpuDevice !== device || !yoloGpuPipeline) {
+        yoloGpuDevice = device;
+        const shader = device.createShaderModule({ code: `
+          struct Params {
+            side: u32, sourceWidth: u32, sourceHeight: u32,
+            drawWidth: u32, drawHeight: u32, offsetX: u32, offsetY: u32, pad: u32
+          };
+          @group(0) @binding(0) var sourceImage: texture_2d<f32>;
+          @group(0) @binding(1) var<storage, read_write> outputData: array<f32>;
+          @group(0) @binding(2) var<uniform> params: Params;
+          @compute @workgroup_size(8, 8)
+          fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+            let x = gid.x;
+            let y = gid.y;
+            if (x >= params.side || y >= params.side) { return; }
+            let index = y * params.side + x;
+            if (x < params.offsetX || y < params.offsetY ||
+                x >= params.offsetX + params.drawWidth ||
+                y >= params.offsetY + params.drawHeight) {
+              let grey = 114.0 / 255.0;
+              outputData[index] = grey;
+              outputData[params.side * params.side + index] = grey;
+              outputData[2u * params.side * params.side + index] = grey;
+              return;
+            }
+            let sourceX = min(params.sourceWidth - 1u,
+              u32((f32(x - params.offsetX) + 0.5) * f32(params.sourceWidth) / f32(params.drawWidth)));
+            let sourceY = min(params.sourceHeight - 1u,
+              u32((f32(y - params.offsetY) + 0.5) * f32(params.sourceHeight) / f32(params.drawHeight)));
+            let rgb = textureLoad(sourceImage, vec2<i32>(i32(sourceX), i32(sourceY)), 0).rgb;
+            outputData[index] = rgb.r;
+            outputData[params.side * params.side + index] = rgb.g;
+            outputData[2u * params.side * params.side + index] = rgb.b;
+          }
+        ` });
+        yoloGpuPipeline = device.createComputePipeline({
+          layout: 'auto',
+          compute: { module: shader, entryPoint: 'main' }
+        });
+      }
+      if (yoloGpuSide !== side) {
+        if (yoloGpuInputBuffer) yoloGpuInputBuffer.destroy();
+        yoloGpuSide = side;
+        const bytes = side * side * 3 * Float32Array.BYTES_PER_ELEMENT;
+        yoloGpuInputBuffer = device.createBuffer({
+          size: bytes,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST
+        });
+        yoloGpuInputTensor = ort.Tensor.fromGpuBuffer(yoloGpuInputBuffer, {
+          dataType: 'float32', dims: [1, 3, side, side]
+        });
+        yoloGpuParamsBuffer = device.createBuffer({
+          size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+        });
+        yoloGpuBindGroup = null;
+      }
+      if (yoloGpuTextureWidth !== video.videoWidth || yoloGpuTextureHeight !== video.videoHeight) {
+        if (yoloGpuTexture) yoloGpuTexture.destroy();
+        yoloGpuTextureWidth = video.videoWidth;
+        yoloGpuTextureHeight = video.videoHeight;
+        yoloGpuTexture = device.createTexture({
+          size: [yoloGpuTextureWidth, yoloGpuTextureHeight, 1],
+          format: 'rgba8unorm',
+          usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.TEXTURE_BINDING
+        });
+        yoloGpuBindGroup = null;
+      }
+      if (!yoloGpuBindGroup) {
+        yoloGpuBindGroup = device.createBindGroup({
+          layout: yoloGpuPipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: yoloGpuTexture.createView() },
+            { binding: 1, resource: { buffer: yoloGpuInputBuffer } },
+            { binding: 2, resource: { buffer: yoloGpuParamsBuffer } }
+          ]
+        });
+      }
+      return true;
+    } catch (error) {
+      yoloGpuDisabled = true;
+      log('GPU preprocessing unavailable; using CPU fallback: ' + error.message, 'warn');
+      return false;
+    }
+  }
+
+  function runYoloGpuPreprocess(side, drawW, drawH, offX, offY) {
+    const device = yoloGpuDevice;
+    device.queue.copyExternalImageToTexture(
+      { source: video },
+      { texture: yoloGpuTexture },
+      [video.videoWidth, video.videoHeight]
+    );
+    const params = new Uint32Array([
+      side, video.videoWidth, video.videoHeight, drawW, drawH, offX, offY, 0
+    ]);
+    device.queue.writeBuffer(yoloGpuParamsBuffer, 0, params);
+    const encoder = device.createCommandEncoder();
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(yoloGpuPipeline);
+    pass.setBindGroup(0, yoloGpuBindGroup);
+    pass.dispatchWorkgroups(Math.ceil(side / 8), Math.ceil(side / 8));
+    pass.end();
+    device.queue.submit([encoder.finish()]);
+    return yoloGpuInputTensor;
+  }
 
   async function runYoloDetection() {
     if (!state.rfSession || state.rfBusy || !video.videoWidth || !video.videoHeight) return;
@@ -519,26 +650,51 @@
         yoloCameraInput = new Float32Array(planeSize * 3);
         yoloCameraTensor = new window.ort.Tensor('float32', yoloCameraInput, [1, 3, side, side]);
       }
-      const inputCtx = yoloCameraContext;
-      // Ultralytics detection exports use RGB pixels scaled to [0, 1], not ImageNet normalisation.
-      inputCtx.fillStyle = 'rgb(114,114,114)';
-      inputCtx.fillRect(0, 0, side, side);
       const scale = Math.min(side / video.videoWidth, side / video.videoHeight);
       const drawW = Math.round(video.videoWidth * scale), drawH = Math.round(video.videoHeight * scale);
       const offX = Math.floor((side - drawW) / 2), offY = Math.floor((side - drawH) / 2);
-      inputCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, offX, offY, drawW, drawH);
-      const pixels = inputCtx.getImageData(0, 0, side, side).data, plane = side * side;
-      stage.preprocess = performance.now() - stageMark;
-      stageMark = performance.now();
-      const input = yoloCameraInput;
-      const toFloat = yoloByteToFloat;
-      for (let p = 0, rgba = 0; p < plane; p++, rgba += 4) {
-        input[p] = toFloat[pixels[rgba]];
-        input[plane + p] = toFloat[pixels[rgba + 1]];
-        input[plane * 2 + p] = toFloat[pixels[rgba + 2]];
+      let inputTensor = null;
+      let gpuPreprocessed = false;
+      if (await prepareYoloGpuPreprocessor(side)) {
+        try {
+          inputTensor = runYoloGpuPreprocess(side, drawW, drawH, offX, offY);
+          gpuPreprocessed = true;
+          if (!yoloGpuLogged) {
+            log('GPU preprocessing active: camera resize, letterbox and RGB planar conversion run on the ONNX WebGPU device.');
+            yoloGpuLogged = true;
+          }
+        } catch (error) {
+          yoloGpuDisabled = true;
+          log('GPU preprocessing failed; switching to CPU fallback: ' + error.message, 'warn');
+        }
       }
-      const feeds = { [state.rfSession.inputNames[0]]: yoloCameraTensor };
-      stage.pack = performance.now() - stageMark;
+      if (!gpuPreprocessed) {
+        const inputCtx = yoloCameraContext;
+        // Fill the letterbox once per canvas allocation. The video dimensions and
+        // letterbox geometry stay fixed during normal camera operation.
+        if (yoloCameraCanvas.dataset.letterboxSide !== String(side)) {
+          inputCtx.fillStyle = 'rgb(114,114,114)';
+          inputCtx.fillRect(0, 0, side, side);
+          yoloCameraCanvas.dataset.letterboxSide = String(side);
+        }
+        inputCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, offX, offY, drawW, drawH);
+        const pixels = inputCtx.getImageData(0, 0, side, side).data, plane = side * side;
+        stage.preprocess = performance.now() - stageMark;
+        stageMark = performance.now();
+        const input = yoloCameraInput;
+        const toFloat = yoloByteToFloat;
+        for (let p = 0, rgba = 0; p < plane; p++, rgba += 4) {
+          input[p] = toFloat[pixels[rgba]];
+          input[plane + p] = toFloat[pixels[rgba + 1]];
+          input[plane * 2 + p] = toFloat[pixels[rgba + 2]];
+        }
+        inputTensor = yoloCameraTensor;
+        stage.pack = performance.now() - stageMark;
+      } else {
+        stage.preprocess = performance.now() - stageMark;
+        stage.pack = 0;
+      }
+      const feeds = { [state.rfSession.inputNames[0]]: inputTensor };
       stageMark = performance.now();
       const result = await state.rfSession.run(feeds);
       stage.inference = performance.now() - stageMark;

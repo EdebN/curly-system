@@ -490,10 +490,14 @@
   let yoloCameraTensor = null;
   const yoloByteToFloat = Float32Array.from({ length: 256 }, (_, value) => value / 255);
 
+  const yoloStageSamples = [];
+
   async function runYoloDetection() {
     if (!state.rfSession || state.rfBusy || !video.videoWidth || !video.videoHeight) return;
     state.rfBusy = true;
     const inferenceStarted = performance.now();
+    let stageMark = inferenceStarted;
+    const stage = {};
     try {
       const side = state.rfInputSize || 640;
       if (!yoloCameraCanvas) {
@@ -516,6 +520,8 @@
       const offX = Math.floor((side - drawW) / 2), offY = Math.floor((side - drawH) / 2);
       inputCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, offX, offY, drawW, drawH);
       const pixels = inputCtx.getImageData(0, 0, side, side).data, plane = side * side;
+      stage.preprocess = performance.now() - stageMark;
+      stageMark = performance.now();
       const input = yoloCameraInput;
       const toFloat = yoloByteToFloat;
       for (let p = 0, rgba = 0; p < plane; p++, rgba += 4) {
@@ -524,7 +530,11 @@
         input[plane * 2 + p] = toFloat[pixels[rgba + 2]];
       }
       const feeds = { [state.rfSession.inputNames[0]]: yoloCameraTensor };
+      stage.pack = performance.now() - stageMark;
+      stageMark = performance.now();
       const result = await state.rfSession.run(feeds);
+      stage.inference = performance.now() - stageMark;
+      stageMark = performance.now();
       const outputName = state.rfSession.outputNames[0];
       const output = result[outputName];
       const dims = output && output.dims ? output.dims : [];
@@ -587,6 +597,8 @@
         });
       }
       const detections = suppressYoloDuplicates(candidates);
+      stage.decode = performance.now() - stageMark;
+      stageMark = performance.now();
       updateSpatialTracks(detections);
       state.aiDetections = filterRelevantDetections(detections);
       drawAIDetections();
@@ -594,6 +606,15 @@
       $('speciesMatchCount').textContent = '—';
       $('detectionReadout').textContent = 'OBJECTS ' + state.aiDetections.length;
       renderTracks();
+      stage.render = performance.now() - stageMark;
+      stage.total = performance.now() - inferenceStarted;
+      yoloStageSamples.push(stage);
+      if (yoloStageSamples.length >= 20) {
+        const keys = ['preprocess', 'pack', 'inference', 'decode', 'render', 'total'];
+        const summary = keys.map(key => key + ' ' + (yoloStageSamples.reduce((sum, item) => sum + item[key], 0) / yoloStageSamples.length).toFixed(1) + ' ms').join(' · ');
+        log('YOLO pipeline average over ' + yoloStageSamples.length + ' frames: ' + summary + '.');
+        yoloStageSamples.length = 0;
+      }
       $('aiStatus').textContent = detections.length
         ? state.aiDetections.length + ' YOLO detection(s) · ' + classCount + ' classes · ' + Math.round(performance.now() - inferenceStarted) + ' ms. Confidence is a model score, not certainty.'
         : 'No detections passed the confidence threshold. Lower the confidence slider to inspect weaker candidates.';

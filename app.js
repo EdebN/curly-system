@@ -387,7 +387,7 @@
     if (preference === 'wasm') return { session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: ['wasm'] }), provider: 'WASM (CPU)' };
     if (preference === 'webgpu') return { session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: [webgpuProvider, 'wasm'] }), provider: 'WebGPU (Metal-backed where supported)' };
     const candidates = []; const failures = [];
-    if (webgpuAvailable) { try { candidates.push({ session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: ['webgpu', 'wasm'] }), provider: 'WebGPU (Metal-backed where supported)' }); } catch (e) { failures.push('WebGPU: ' + e.message); } }
+    if (webgpuAvailable) { try { candidates.push({ session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: [webgpuProvider, 'wasm'] }), provider: 'WebGPU (Metal-backed where supported)' }); } catch (e) { failures.push('WebGPU: ' + e.message); } }
     try { candidates.push({ session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: ['wasm'] }), provider: 'WASM (CPU)' }); } catch (e) { failures.push('CPU: ' + e.message); }
     if (!candidates.length) throw new Error('No ONNX execution backend could initialise. ' + failures.join(' | '));
     if (candidates.length === 1) return candidates[0];
@@ -557,10 +557,8 @@
       const values = output.data;
       // Cache the layout once and index the typed output directly in the hot loop.
       // Avoids hundreds of thousands of tiny accessor calls per frame.
-      const channelStride = channelsFirst ? boxCount : 1;
       const anchorStride = channelsFirst ? 1 : channelCount;
       const classBase = channelsFirst ? 4 * boxCount : 4;
-      const readChannel = (anchor, channel) => values[channel * channelStride + anchor * anchorStride];
       if (state.rfLabels.length !== classCount) {
         log('YOLO output has ' + classCount + ' classes but ' + state.rfLabels.length + ' labels are loaded. Missing names will use class indices.', 'warn');
       }

@@ -503,6 +503,7 @@
   // capability is missing, the established CPU canvas path remains the fallback.
   let yoloGpuDevice = null;
   let yoloGpuPipeline = null;
+  let yoloGpuSampler = null;
   let yoloGpuTexture = null;
   let yoloGpuTextureWidth = 0;
   let yoloGpuTextureHeight = 0;
@@ -535,6 +536,7 @@
           @group(0) @binding(0) var sourceImage: texture_2d<f32>;
           @group(0) @binding(1) var<storage, read_write> outputData: array<f32>;
           @group(0) @binding(2) var<uniform> params: Params;
+          @group(0) @binding(3) var linearSampler: sampler;
           @compute @workgroup_size(8, 8)
           fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
             let x = gid.x;
@@ -550,11 +552,11 @@
               outputData[2u * params.side * params.side + index] = grey;
               return;
             }
-            let sourceX = min(params.sourceWidth - 1u,
-              u32((f32(x - params.offsetX) + 0.5) * f32(params.sourceWidth) / f32(params.drawWidth)));
-            let sourceY = min(params.sourceHeight - 1u,
-              u32((f32(y - params.offsetY) + 0.5) * f32(params.sourceHeight) / f32(params.drawHeight)));
-            let rgb = textureLoad(sourceImage, vec2<i32>(i32(sourceX), i32(sourceY)), 0).rgb;
+            let uv = vec2<f32>(
+              (f32(x - params.offsetX) + 0.5) / f32(params.drawWidth),
+              (f32(y - params.offsetY) + 0.5) / f32(params.drawHeight)
+            );
+            let rgb = textureSampleLevel(sourceImage, linearSampler, uv, 0.0).rgb;
             outputData[index] = rgb.r;
             outputData[params.side * params.side + index] = rgb.g;
             outputData[2u * params.side * params.side + index] = rgb.b;
@@ -564,6 +566,7 @@
           layout: 'auto',
           compute: { module: shader, entryPoint: 'main' }
         });
+        yoloGpuSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
       }
       if (yoloGpuSide !== side) {
         if (yoloGpuInputBuffer) yoloGpuInputBuffer.destroy();
@@ -598,7 +601,8 @@
           entries: [
             { binding: 0, resource: yoloGpuTexture.createView() },
             { binding: 1, resource: { buffer: yoloGpuInputBuffer } },
-            { binding: 2, resource: { buffer: yoloGpuParamsBuffer } }
+            { binding: 2, resource: { buffer: yoloGpuParamsBuffer } },
+            { binding: 3, resource: yoloGpuSampler }
           ]
         });
       }
@@ -672,10 +676,11 @@
         const inputCtx = yoloCameraContext;
         // Fill the letterbox once per canvas allocation. The video dimensions and
         // letterbox geometry stay fixed during normal camera operation.
-        if (yoloCameraCanvas.dataset.letterboxSide !== String(side)) {
+        const letterboxKey = [side, video.videoWidth, video.videoHeight, drawW, drawH, offX, offY].join(':');
+        if (yoloCameraCanvas.dataset.letterboxKey !== letterboxKey) {
           inputCtx.fillStyle = 'rgb(114,114,114)';
           inputCtx.fillRect(0, 0, side, side);
-          yoloCameraCanvas.dataset.letterboxSide = String(side);
+          yoloCameraCanvas.dataset.letterboxKey = letterboxKey;
         }
         inputCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, offX, offY, drawW, drawH);
         const pixels = inputCtx.getImageData(0, 0, side, side).data, plane = side * side;

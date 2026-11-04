@@ -517,14 +517,32 @@
 
   const yoloStageSamples = [];
 
+  let yoloGpuUnavailableReasonLogged = false;
+
   async function prepareYoloGpuPreprocessor(side) {
     if (yoloGpuDisabled || !state.rfProvider.toLowerCase().includes('webgpu')) return false;
     const ort = window.ort;
-    const device = ort && ort.env && ort.env.webgpu && ort.env.webgpu.device;
-    if (!device || !ort.Tensor || typeof ort.Tensor.fromGpuBuffer !== 'function' ||
-        typeof device.queue.copyExternalImageToTexture !== 'function') return false;
+    if (!ort || !ort.env || !ort.env.webgpu) return false;
+    if (!ort.Tensor || typeof ort.Tensor.fromGpuBuffer !== 'function') {
+      if (!yoloGpuUnavailableReasonLogged) {
+        log('GPU preprocessing unavailable: this ONNX Runtime build does not expose Tensor.fromGpuBuffer(). Using CPU preprocessing.', 'warn');
+        yoloGpuUnavailableReasonLogged = true;
+      }
+      return false;
+    }
 
     try {
+      // ONNX Runtime Web exposes its shared WebGPU device asynchronously.
+      // Treating this Promise as a GPUDevice silently disabled the first implementation.
+      const device = await ort.env.webgpu.device;
+      if (!device || !device.queue || typeof device.createShaderModule !== 'function' ||
+          typeof device.queue.copyExternalImageToTexture !== 'function') {
+        if (!yoloGpuUnavailableReasonLogged) {
+          log('GPU preprocessing unavailable: ONNX Runtime did not expose a usable WebGPU device. Using CPU preprocessing.', 'warn');
+          yoloGpuUnavailableReasonLogged = true;
+        }
+        return false;
+      }
       if (yoloGpuDevice !== device || !yoloGpuPipeline) {
         yoloGpuDevice = device;
         const shader = device.createShaderModule({ code: `

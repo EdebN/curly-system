@@ -381,7 +381,8 @@
       try { window.ort.env.webgpu.powerPreference = 'high-performance'; } catch (_) {}
     }
     const options = { graphOptimizationLevel: 'all', executionMode: 'sequential', enableCpuMemArena: false, enableMemPattern: false };
-    const webgpuProvider = { name: 'webgpu', preferredLayout: 'NCHW' };
+    // Use ONNX Runtime WebGPU's default layout selection; do not force NCHW.
+    const webgpuProvider = 'webgpu';
     const webgpuAvailable = !!(navigator.gpu && window.ort.env && window.ort.env.webgpu);
     if (preference === 'webgpu' && !webgpuAvailable) throw new Error('WebGPU is unavailable in this browser. Use Automatic or Standard CPU instead.');
     if (preference === 'wasm') return { session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: ['wasm'] }), provider: 'WASM (CPU)' };

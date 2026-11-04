@@ -522,7 +522,6 @@
     const ort = window.ort;
     const device = ort && ort.env && ort.env.webgpu && ort.env.webgpu.device;
     if (!device || !ort.Tensor || typeof ort.Tensor.fromGpuBuffer !== 'function' ||
-        typeof device.importExternalTexture !== 'function' ||
         typeof device.queue.copyExternalImageToTexture !== 'function') return false;
 
     try {
@@ -562,10 +561,13 @@
             outputData[2u * params.side * params.side + index] = rgb.b;
           }
         ` });
-        yoloGpuPipeline = device.createComputePipeline({
-          layout: 'auto',
-          compute: { module: shader, entryPoint: 'main' }
-        });
+        const compilation = await shader.getCompilationInfo();
+        const shaderErrors = compilation.messages.filter(message => message.type === 'error');
+        if (shaderErrors.length) throw new Error('GPU preprocessing shader: ' + shaderErrors.map(message => message.message).join('; '));
+        const pipelineOptions = { layout: 'auto', compute: { module: shader, entryPoint: 'main' } };
+        yoloGpuPipeline = typeof device.createComputePipelineAsync === 'function'
+          ? await device.createComputePipelineAsync(pipelineOptions)
+          : device.createComputePipeline(pipelineOptions);
         yoloGpuSampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
       }
       if (yoloGpuSide !== side) {

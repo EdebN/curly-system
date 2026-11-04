@@ -122,7 +122,8 @@
       updatePerformanceReadout();
       inspectZoomCapabilities();
       sizeCanvases();
-      if (!state.detectorModel) loadAIModels().catch((error) => log("AI model loading failed: " + error.message, "error"));
+      // Do not initialise TensorFlow.js beside YOLO. Both can compete for GPU memory/compute.
+      // The conventional detector is loaded only when the user explicitly requests it.
       state.raf = requestAnimationFrame(processFrame);
     } catch (error) {
       const message = error && error.message ? error.message : String(error);
@@ -374,11 +375,17 @@
   async function createYoloRuntimeSession(bytes, preference) {
     if (!window.ort || !window.ort.InferenceSession) throw new Error('ONNX Runtime Web did not load. Check internet access and reload.');
     if (window.ort.env && window.ort.env.wasm) { window.ort.env.wasm.numThreads = 1; window.ort.env.wasm.proxy = false; }
+    // Ask the browser for its high-performance GPU adapter (Metal on supported Macs).
+    // This is a hint, not a guarantee that the OS will select a discrete GPU.
+    if (window.ort.env && window.ort.env.webgpu) {
+      try { window.ort.env.webgpu.powerPreference = 'high-performance'; } catch (_) {}
+    }
     const options = { graphOptimizationLevel: 'all', executionMode: 'sequential', enableCpuMemArena: false, enableMemPattern: false };
+    const webgpuProvider = { name: 'webgpu', preferredLayout: 'NCHW' };
     const webgpuAvailable = !!(navigator.gpu && window.ort.env && window.ort.env.webgpu);
     if (preference === 'webgpu' && !webgpuAvailable) throw new Error('WebGPU is unavailable in this browser. Use Automatic or Standard CPU instead.');
     if (preference === 'wasm') return { session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: ['wasm'] }), provider: 'WASM (CPU)' };
-    if (preference === 'webgpu') return { session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: ['webgpu', 'wasm'] }), provider: 'WebGPU (Metal-backed where supported)' };
+    if (preference === 'webgpu') return { session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: [webgpuProvider, 'wasm'] }), provider: 'WebGPU (Metal-backed where supported)' };
     const candidates = []; const failures = [];
     if (webgpuAvailable) { try { candidates.push({ session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: ['webgpu', 'wasm'] }), provider: 'WebGPU (Metal-backed where supported)' }); } catch (e) { failures.push('WebGPU: ' + e.message); } }
     try { candidates.push({ session: await window.ort.InferenceSession.create(bytes, { ...options, executionProviders: ['wasm'] }), provider: 'WASM (CPU)' }); } catch (e) { failures.push('CPU: ' + e.message); }
@@ -548,22 +555,39 @@
       const classCount = channelCount - 4;
       if (classCount < 1) throw new Error('YOLO output has no class-score channels.');
       const values = output.data;
-      const at = (anchor, channel) => channelsFirst
-        ? values[channel * boxCount + anchor]
-        : values[anchor * channelCount + channel];
+      // Cache the layout once and index the typed output directly in the hot loop.
+      // Avoids hundreds of thousands of tiny accessor calls per frame.
+      const channelStride = channelsFirst ? boxCount : 1;
+      const anchorStride = channelsFirst ? 1 : channelCount;
+      const classBase = channelsFirst ? 4 * boxCount : 4;
+      const readChannel = (anchor, channel) => values[channel * channelStride + anchor * anchorStride];
       if (state.rfLabels.length !== classCount) {
         log('YOLO output has ' + classCount + ' classes but ' + state.rfLabels.length + ' labels are loaded. Missing names will use class indices.', 'warn');
       }
       const candidates = [];
+      const threshold = state.aiThreshold;
       for (let i = 0; i < boxCount; i++) {
-        let score = -Infinity, classId = 0;
-        for (let c = 0; c < classCount; c++) {
-          const raw = at(i, c + 4);
-          const confidence = Math.max(0, Math.min(1, raw));
-          if (confidence > score) { score = confidence; classId = c; }
+        let score = threshold, classId = -1;
+        const anchorOffset = i * anchorStride;
+        if (channelsFirst) {
+          for (let c = 0, offset = classBase + i; c < classCount; c++, offset += boxCount) {
+            const confidence = values[offset];
+            if (confidence > score) { score = confidence; classId = c; }
+          }
+        } else {
+          const offset = anchorOffset + 4;
+          for (let c = 0; c < classCount; c++) {
+            const confidence = values[offset + c];
+            if (confidence > score) { score = confidence; classId = c; }
+          }
         }
-        if (score < state.aiThreshold) continue;
-        let cx = at(i, 0), cy = at(i, 1), width = at(i, 2), height = at(i, 3);
+        if (classId < 0) continue;
+        let cx = values[anchorOffset], cy = values[anchorOffset + anchorStride],
+          width = values[anchorOffset + anchorStride * 2], height = values[anchorOffset + anchorStride * 3];
+        if (channelsFirst) {
+          cx = values[i]; cy = values[boxCount + i];
+          width = values[boxCount * 2 + i]; height = values[boxCount * 3 + i];
+        }
         if (Math.max(Math.abs(cx), Math.abs(cy), Math.abs(width), Math.abs(height)) <= 2) {
           cx *= side; cy *= side; width *= side; height *= side;
         }

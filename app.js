@@ -482,15 +482,32 @@
     return kept;
   }
 
+  // Reuse camera preprocessing allocations across frames; recreating canvases and tensors every frame adds avoidable GC and setup cost.
+  let yoloCameraCanvas = null;
+  let yoloCameraContext = null;
+  let yoloCameraSide = 0;
+  let yoloCameraInput = null;
+  let yoloCameraTensor = null;
+  const yoloByteToFloat = Float32Array.from({ length: 256 }, (_, value) => value / 255);
+
   async function runYoloDetection() {
     if (!state.rfSession || state.rfBusy || !video.videoWidth || !video.videoHeight) return;
     state.rfBusy = true;
     const inferenceStarted = performance.now();
     try {
       const side = state.rfInputSize || 640;
-      const inputCanvas = document.createElement('canvas');
-      inputCanvas.width = side; inputCanvas.height = side;
-      const inputCtx = inputCanvas.getContext('2d', { willReadFrequently: true });
+      if (!yoloCameraCanvas) {
+        yoloCameraCanvas = document.createElement('canvas');
+        yoloCameraContext = yoloCameraCanvas.getContext('2d', { willReadFrequently: true, alpha: false });
+      }
+      if (yoloCameraSide !== side) {
+        yoloCameraCanvas.width = side; yoloCameraCanvas.height = side;
+        yoloCameraSide = side;
+        const planeSize = side * side;
+        yoloCameraInput = new Float32Array(planeSize * 3);
+        yoloCameraTensor = new window.ort.Tensor('float32', yoloCameraInput, [1, 3, side, side]);
+      }
+      const inputCtx = yoloCameraContext;
       // Ultralytics detection exports use RGB pixels scaled to [0, 1], not ImageNet normalisation.
       inputCtx.fillStyle = 'rgb(114,114,114)';
       inputCtx.fillRect(0, 0, side, side);
@@ -499,15 +516,15 @@
       const offX = Math.floor((side - drawW) / 2), offY = Math.floor((side - drawH) / 2);
       inputCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight, offX, offY, drawW, drawH);
       const pixels = inputCtx.getImageData(0, 0, side, side).data, plane = side * side;
-      const input = new Float32Array(plane * 3);
-      for (let p = 0; p < plane; p++) {
-        input[p] = pixels[p * 4] / 255;
-        input[plane + p] = pixels[p * 4 + 1] / 255;
-        input[plane * 2 + p] = pixels[p * 4 + 2] / 255;
+      const input = yoloCameraInput;
+      const toFloat = yoloByteToFloat;
+      for (let p = 0, rgba = 0; p < plane; p++, rgba += 4) {
+        input[p] = toFloat[pixels[rgba]];
+        input[plane + p] = toFloat[pixels[rgba + 1]];
+        input[plane * 2 + p] = toFloat[pixels[rgba + 2]];
       }
-      const result = await state.rfSession.run({
-        [state.rfSession.inputNames[0]]: new window.ort.Tensor('float32', input, [1, 3, side, side])
-      });
+      const feeds = { [state.rfSession.inputNames[0]]: yoloCameraTensor };
+      const result = await state.rfSession.run(feeds);
       const outputName = state.rfSession.outputNames[0];
       const output = result[outputName];
       const dims = output && output.dims ? output.dims : [];

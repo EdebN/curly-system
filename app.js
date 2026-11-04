@@ -352,20 +352,25 @@
     return $('rfEngine') ? $('rfEngine').value : 'auto';
   }
 
-  async function benchmarkYoloSession(session) {
+  async function benchmarkYoloSession(session, seed) {
     const name = session.inputNames[0];
     const meta = session.inputMetadata && session.inputMetadata[name];
     const dims = meta && meta.dimensions;
     const side = dims && dims.length >= 4 && Number.isFinite(dims[2]) && dims[2] > 0 ? dims[2] : 640;
-    const input = new window.ort.Tensor('float32', new Float32Array(3 * side * side), [1, 3, side, side]);
-    const feeds = { [name]: input };
-    for (let i = 0; i < 3; i++) await session.run(feeds);
+    const plane = side * side;
+    // Use deterministic, image-like non-zero RGB values rather than an all-zero tensor.
+    const data = new Float32Array(plane * 3);
+    let x = (seed || 17) >>> 0;
+    for (let i = 0; i < data.length; i++) { x = (1664525 * x + 1013904223) >>> 0; data[i] = (x & 65535) / 65535; }
+    const feeds = { [name]: new window.ort.Tensor('float32', data, [1, 3, side, side]) };
+    for (let i = 0; i < 12; i++) await session.run(feeds);
     const timings = [];
-    for (let i = 0; i < 7; i++) { const t0 = performance.now(); await session.run(feeds); timings.push(performance.now() - t0); }
-    timings.sort((x, y) => x - y);
-    return timings[Math.floor(timings.length / 2)];
+    for (let i = 0; i < 31; i++) { const t0 = performance.now(); await session.run(feeds); timings.push(performance.now() - t0); }
+    timings.sort((u, v) => u - v);
+    const median = timings[15];
+    const p90 = timings[Math.floor(timings.length * 0.9)];
+    return { median, p90, samples: timings.length };
   }
-
   async function createYoloRuntimeSession(bytes, preference) {
     if (!window.ort || !window.ort.InferenceSession) throw new Error('ONNX Runtime Web did not load. Check internet access and reload.');
     if (window.ort.env && window.ort.env.wasm) { window.ort.env.wasm.numThreads = 1; window.ort.env.wasm.proxy = false; }
@@ -381,13 +386,13 @@
     if (candidates.length === 1) return candidates[0];
     $('rfStatus').textContent = 'Benchmarking Apple GPU and CPU on this device…';
     const measured = [];
-    for (const candidate of candidates) { try { candidate.latency = await benchmarkYoloSession(candidate.session); measured.push(candidate); } catch (e) { failures.push(candidate.provider + ' benchmark: ' + e.message); if (candidate.session.release) await candidate.session.release(); } }
+    for (const candidate of candidates) { try { candidate.timing = await benchmarkYoloSession(candidate.session, measured.length + 17); measured.push(candidate); } catch (e) { failures.push(candidate.provider + ' benchmark: ' + e.message); if (candidate.session.release) await candidate.session.release(); } }
     if (!measured.length) throw new Error('Both inference backends failed their benchmark. ' + failures.join(' | '));
-    measured.sort((x, y) => x.latency - y.latency);
+    measured.sort((x, y) => x.timing.median - y.timing.median);
     const winner = measured[0];
     for (const candidate of measured.slice(1)) if (candidate.session.release) await candidate.session.release();
-    log('Automatic ONNX benchmark: ' + measured.map(x => x.provider + ' ' + x.latency.toFixed(1) + ' ms').join(' · ') + '. Selected ' + winner.provider + '.');
-    return { session: winner.session, provider: winner.provider + ' · benchmark ' + winner.latency.toFixed(1) + ' ms' };
+    log('Automatic ONNX benchmark: ' + measured.map(x => x.provider + ' median ' + x.timing.median.toFixed(1) + ' ms / p90 ' + x.timing.p90.toFixed(1) + ' ms').join(' · ') + '. Selected ' + winner.provider + '.');
+    return { session: winner.session, provider: winner.provider + ' · benchmark ' + winner.timing.median.toFixed(1) + ' ms' };
   }
   async function installYoloRuntime(bytes, modelName, preference) {
     const result = await createYoloRuntimeSession(bytes, preference);

@@ -424,6 +424,29 @@
     $('aiStatus').textContent = 'YOLO11 detector ready. Start the camera or use a known test image.';
   }
 
+  async function loadBundledYoloOnnxModel() {
+    if (state.rfSession) return;
+    const modelUrl = new URL('./best.onnx%203', document.baseURI);
+    $('loadRfDetr').disabled = true;
+    $('rfEngine').disabled = true;
+    $('rfStatus').textContent = 'Downloading bundled YOLO11 model…';
+    log('Loading bundled YOLO11 model from ' + modelUrl.pathname + '.');
+    try {
+      const response = await fetch(modelUrl.href, { cache: 'no-cache' });
+      if (!response.ok) throw new Error('Model request returned HTTP ' + response.status);
+      const bytes = await response.arrayBuffer();
+      if (bytes.byteLength < 1024) throw new Error('Downloaded model is unexpectedly small (' + bytes.byteLength + ' bytes).');
+      await installYoloRuntime(bytes, 'best.onnx 3', yoloEnginePreference());
+      log('Bundled YOLO11 model downloaded and loaded automatically (' + (bytes.byteLength / 1048576).toFixed(1) + ' MB).');
+    } catch (error) {
+      $('rfStatus').textContent = 'Automatic model load failed: ' + error.message + ' You can still choose the ONNX file manually.';
+      log('Bundled YOLO11 model could not be loaded: ' + error.message + '. Manual model selection remains available.', 'warn');
+    } finally {
+      $('loadRfDetr').disabled = false;
+      $('rfEngine').disabled = false;
+    }
+  }
+
   async function loadYoloOnnxModel(fileOverride) {
     const file = fileOverride || ($('rfModelPicker').files && $('rfModelPicker').files[0]);
     if (!file) { $('rfStatus').textContent = 'Choose your trained YOLO11 .onnx file first.'; return; }
@@ -2724,7 +2747,7 @@
     log('Wildlife Vision web app initialising.');
     log('Runtime: ' + navigator.userAgent);
     log('Secure context: ' + (window.isSecureContext ? 'yes' : 'no') + '.');
-    log('AI detector loads on demand. YOLO11 ONNX inference is available as an experimental model-upload path; motion tracking remains available as a secondary mode.');
+    log('AI detector initialising. WildlifeVision will try to load the bundled YOLO11 ONNX model automatically; manual model selection remains available as a fallback.');
     if (!window.isSecureContext) log('Use HTTPS (GitHub Pages) for camera access and SHA-256 duplicate checks.', 'warn');
     try {
       state.db = await openDatabase();
@@ -2735,6 +2758,7 @@
       $('storageLabel').textContent = 'Ready';
       setCameraCapability('Not started', 'neutral');
       log('Local database ready.');
+      loadBundledYoloOnnxModel();
       $('trainSpecies').disabled = !state.records.some((record) => record.speciesLabel && !['Unlabelled', 'Unknown'].includes(record.speciesLabel.trim()));
     } catch (error) {
       $('storageLabel').textContent = 'Error';

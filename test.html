@@ -88,14 +88,24 @@ $("run").addEventListener("click",async()=>{
  if(!session||!image)return;
  $("run").disabled=true;$("status").textContent="Running inference…";
  try{
-  const started=performance.now(),sideMeta=session.inputMetadata?.[session.inputNames[0]]?.dimensions;
+  const sideMeta=session.inputMetadata?.[session.inputNames[0]]?.dimensions;
   const side=sideMeta&&Number.isFinite(sideMeta[2])&&sideMeta[2]>0?sideMeta[2]:640;
   const tmp=document.createElement("canvas");tmp.width=side;tmp.height=side;const t=tmp.getContext("2d",{willReadFrequently:true});
   t.fillStyle="rgb(114,114,114)";t.fillRect(0,0,side,side);
   const scale=Math.min(side/image.naturalWidth,side/image.naturalHeight),dw=Math.round(image.naturalWidth*scale),dh=Math.round(image.naturalHeight*scale),ox=Math.floor((side-dw)/2),oy=Math.floor((side-dh)/2);
   t.drawImage(image,ox,oy,dw,dh);const px=t.getImageData(0,0,side,side).data,plane=side*side,input=new Float32Array(plane*3);
   for(let p=0;p<plane;p++){input[p]=px[p*4]/255;input[plane+p]=px[p*4+1]/255;input[2*plane+p]=px[p*4+2]/255;}
-  const outputSet=await session.run({[session.inputNames[0]]:new ort.Tensor("float32",input,[1,3,side,side])});
+  // Match the live camera benchmark: warm up the selected session, then time session.run only.
+  // This excludes CPU image preprocessing, output decoding, NMS and canvas drawing.
+  const feeds={[session.inputNames[0]]:new ort.Tensor("float32",input,[1,3,side,side])};
+  $("status").textContent="Warming up "+backendName+"…";
+  for(let i=0;i<12;i++) await session.run(feeds);
+  const timings=[];
+  $("status").textContent="Benchmarking "+backendName+" · 31 inference runs…";
+  for(let i=0;i<31;i++){const t0=performance.now();await session.run(feeds);timings.push(performance.now()-t0);}
+  timings.sort((a,b)=>a-b);
+  const medianMs=timings[15],p90Ms=timings[Math.floor(timings.length*.9)];
+  const outputSet=await session.run(feeds);
   const out=outputSet[session.outputNames[0]],dims=out.dims;if(dims.length!==3||dims[0]!==1)throw Error("Expected raw YOLO output [1,4+classes,anchors] or [1,anchors,4+classes]. Got "+dims.join("×"));
   const cf=dims[1]<dims[2],channels=cf?dims[1]:dims[2],anchors=cf?dims[2]:dims[1],classes=channels-4,values=out.data;
   const at=(a,c)=>cf?values[c*anchors+a]:values[a*channels+c];
@@ -117,11 +127,11 @@ $("run").addEventListener("click",async()=>{
   const rawTop=rawCandidates.sort((a,b)=>b.score-a.score).slice(0,5);
   const drawBox=(d,raw=false)=>{const [x,y,w,h]=d.box;ctx.save();ctx.lineWidth=Math.max(2,image.naturalWidth/700);ctx.strokeStyle=raw?"#72b7ff":"#d6b47a";if(raw)ctx.setLineDash([Math.max(5,image.naturalWidth/120),Math.max(3,image.naturalWidth/180)]);ctx.strokeRect(x,y,w,h);const text=(raw?"RAW · ":"")+d.label+" "+(d.score*100).toFixed(1)+"%";ctx.font="bold "+Math.max(12,image.naturalWidth/90)+"px sans-serif";const th=Math.max(20,image.naturalWidth/35);ctx.fillStyle=raw?"#72b7ff":"#d6b47a";ctx.fillRect(x,Math.max(0,y-th),Math.min(canvas.width,ctx.measureText(text).width+12),th);ctx.fillStyle="#101820";ctx.fillText(text,x+6,Math.max(13,y-th/2+5));ctx.restore();};
   if(kept.length){for(const d of kept)drawBox(d);}else{for(const d of rawTop)drawBox(d,true);}
-  const ms=(performance.now()-started).toFixed(1);
+  const ms=medianMs.toFixed(1);
   $("shape").textContent=dims.join("×");$("rawCount").textContent=String(candidates.length);$("finalCount").textContent=String(kept.length);$("duration").textContent=ms+" ms";
   const top=rawTop.slice(0,20);
-  $("details").textContent="Model: "+modelName+"\nImage: "+imageName+"\nInput: [1, 3, "+side+", "+side+"] RGB / 0–1, letterboxed\nOutput: "+dims.join(" × ")+"\nClasses: "+classes+" · Labels loaded: "+labels.length+"\nRaw output numeric range: "+min.toFixed(5)+" to "+max.toFixed(5)+"\nCandidates above threshold before NMS: "+candidates.length+"\nKept after class-agnostic NMS: "+kept.length+"\n\nTOP RAW CANDIDATES (BELOW-THRESHOLD BOXES ARE DIAGNOSTIC ONLY)\n"+(top.map((d,i)=>(i+1)+". "+d.label+" · "+(d.score*100).toFixed(2)+"% · anchor "+d.anchor+" · box "+d.box.map(v=>Math.round(v)).join(", ")).join("\n")||"None") ;
-  $("status").textContent=kept.length?"Finished in "+ms+" ms. Showing "+kept.length+" detections after NMS. This is model output, not verified bird identification.":"Finished in "+ms+" ms. No boxes passed the confidence threshold. Showing up to "+rawTop.length+" highest-scoring raw boxes as dashed blue diagnostic overlays; they are not accepted detections.";
+  $("details").textContent="Model: "+modelName+"\nImage: "+imageName+"\nInput: [1, 3, "+side+", "+side+"] RGB / 0–1, letterboxed\nOutput: "+dims.join(" × ")+"\nClasses: "+classes+" · Labels loaded: "+labels.length+"\nInference benchmark: 12 warm-up runs + 31 measured runs\nMedian inference: "+medianMs.toFixed(2)+" ms · p90: "+p90Ms.toFixed(2)+" ms\nRaw output numeric range: "+min.toFixed(5)+" to "+max.toFixed(5)+"\nCandidates above threshold before NMS: "+candidates.length+"\nKept after class-agnostic NMS: "+kept.length+"\n\nTOP RAW CANDIDATES (BELOW-THRESHOLD BOXES ARE DIAGNOSTIC ONLY)\n"+(top.map((d,i)=>(i+1)+". "+d.label+" · "+(d.score*100).toFixed(2)+"% · anchor "+d.anchor+" · box "+d.box.map(v=>Math.round(v)).join(", ")).join("\n")||"None") ;
+  $("status").textContent=kept.length?"Inference median "+ms+" ms. Showing "+kept.length+" detections after NMS. This is model output, not verified bird identification.":"Inference median "+ms+" ms. No boxes passed the confidence threshold. Showing up to "+rawTop.length+" highest-scoring raw boxes as dashed blue diagnostic overlays; they are not accepted detections.";
  }catch(err){$("status").textContent="Inference failed: "+err.message;$("details").textContent=err.stack||String(err);}
  finally{$("run").disabled=false;}
 });

@@ -2462,9 +2462,15 @@
     } catch(error) { $('importStatus').textContent='Could not delete image: '+error.message; log('Could not delete image: '+error.message,'error'); }
   });
   document.addEventListener('keydown',event=>{
-    if(!$('editDialog').open || ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+    const active = document.activeElement;
+    if(!$('editDialog').open || event.ctrlKey || event.metaKey || event.altKey ||
+      ['INPUT','SELECT','TEXTAREA'].includes(active.tagName) || active.isContentEditable) return;
     if(event.key==='ArrowLeft'){event.preventDefault();moveEditor(-1);}
     if(event.key==='ArrowRight'){event.preventDefault();moveEditor(1);}
+    if(event.key.toLowerCase()==='v' && !$('verifyAnnotations').disabled){
+      event.preventDefault();
+      $('verifyAnnotations').click();
+    }
   });
   $('editPreview').addEventListener('load', paintAnnotation);
   $('annotationCanvas').addEventListener('pointerdown', event => {

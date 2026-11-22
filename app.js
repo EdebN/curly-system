@@ -1786,7 +1786,6 @@
     log('Import started for ' + files.length + ' image(s).');
     await reportStorageUsage();
     const hashes = new Set(state.records.map((record) => record.sha256));
-    const importLabel = $('importLabel').value.trim();
     for (let i = 0; i < files.length; i++) {
       const item = files[i], file = item.file, relativePath = item.relativePath || file.name;
       try {
@@ -1798,7 +1797,6 @@
           const parts = relativePath.split('/').filter(Boolean);
           if (parts.length > 1) label = parts[parts.length - 2] || label;
         }
-        if (importLabel) label = importLabel;
         const record = {
           id: newId(), filename: file.name, sourceName: file.name,
           relativePath, speciesLabel: label, split: 'unassigned', sha256: hash,

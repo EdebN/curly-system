@@ -19,7 +19,7 @@
 <div class="stat"><span>Raw output shape</span><strong id="shape">—</strong></div>
 <div class="stat"><span>Raw candidates ≥ threshold</span><strong id="rawCount">—</strong></div>
 <div class="stat"><span>After NMS</span><strong id="finalCount">—</strong></div>
-<div class="stat"><span>Inference time</span><strong id="duration">—</strong></div>
+<div class="stat"><span>Inference time</span><strong id="duration">—</strong></div><div class="stat"><span>Execution backend</span><strong id="backend">—</strong></div>
 </div><p class="helper" id="status" role="status">Load a model and an image.</p><pre class="results" id="details">Diagnostics will appear here.</pre></div>
 </section>
 <aside class="test-controls">
@@ -34,15 +34,37 @@
 (() => {
 const $=id=>document.getElementById(id);
 const DEFAULT_LABELS=["Australian Ibis","Australian Raven","Australian Ringneck","Black flying fox","Black-bellied Plover","Carnaby's Black-Cockatoo","Fairy Martin","Greater Sand Plover","Hooded Plover","House sparrow","Laughing Dove","Laughing Kookaburra","Little Red Flying Fox","Mallard","Nankeen Kestrel","Red capped Plover","Red Collared Lorikeet","Red-tailed Black Cockatoo","Sacred Kingfisher","Tawny Frogmouth","Welcome Swallow","Western Australian Magpie","Western Wattlebird","White wagtail","Willie Wagtail"];
-let session=null,image=null,labels=DEFAULT_LABELS,modelName="",imageName="";
+let session=null,image=null,labels=DEFAULT_LABELS,modelName="",imageName="",backendName="";
 const canvas=$("preview"),ctx=canvas.getContext("2d");
 $("threshold").addEventListener("input",e=>$("thresholdValue").textContent=e.target.value+"%");
 $("iou").addEventListener("input",e=>$("iouValue").textContent=e.target.value+"%");
 $("modelFile").addEventListener("change",async e=>{
  const file=e.target.files[0];if(!file)return;
- $("status").textContent="Loading ONNX model…";
- try{session=await ort.InferenceSession.create(await file.arrayBuffer(),{executionProviders:["webgpu","wasm"],graphOptimizationLevel:"all"});modelName=file.name;$("status").textContent="Loaded "+file.name+" · inputs "+session.inputNames.join(", ")+" · outputs "+session.outputNames.join(", ");$("run").disabled=!image;}
- catch(err){session=null;$("status").textContent="Model load failed: "+err.message;}
+ $("run").disabled=true;$("status").textContent="Loading ONNX model · trying WebGPU first…";
+ session=null;backendName="";$("backend").textContent="—";
+ try{
+  const bytes=await file.arrayBuffer(),options={graphOptimizationLevel:"all"};
+  if(navigator.gpu){
+   try{
+    session=await ort.InferenceSession.create(bytes,{...options,executionProviders:["webgpu"]});
+    backendName="WebGPU";
+   }catch(gpuError){
+    $("status").textContent="WebGPU failed; falling back to WASM: "+gpuError.message;
+   }
+  }else{
+   $("status").textContent="WebGPU unavailable; falling back to WASM.";
+  }
+  if(!session){
+   session=await ort.InferenceSession.create(bytes,{...options,executionProviders:["wasm"]});
+   backendName="WASM";
+  }
+  modelName=file.name;$("backend").textContent=backendName;
+  $("status").textContent="Loaded "+file.name+" · backend "+backendName+" · inputs "+session.inputNames.join(", ")+" · outputs "+session.outputNames.join(", ");
+  $("run").disabled=!image;
+ }catch(err){
+  session=null;backendName="";$("backend").textContent="Unavailable";
+  $("status").textContent="Model load failed: "+err.message;
+ }
 });
 $("imageFile").addEventListener("change",e=>{
  const file=e.target.files[0];if(!file)return;
@@ -98,7 +120,7 @@ $("run").addEventListener("click",async()=>{
  }catch(err){$("status").textContent="Inference failed: "+err.message;$("details").textContent=err.stack||String(err);}
  finally{$("run").disabled=false;}
 });
-$("clear").addEventListener("click",()=>{image=null;canvas.hidden=true;$("placeholder").hidden=false;$("placeholder").textContent="Choose an image to begin testing.";ctx.clearRect(0,0,canvas.width,canvas.height);$("shape").textContent=$("rawCount").textContent=$("finalCount").textContent=$("duration").textContent="—";$("details").textContent="Diagnostics will appear here.";$("run").disabled=true;});
+$("clear").addEventListener("click",()=>{image=null;canvas.hidden=true;$("placeholder").hidden=false;$("placeholder").textContent="Choose an image to begin testing.";ctx.clearRect(0,0,canvas.width,canvas.height);$("shape").textContent=$("rawCount").textContent=$("finalCount").textContent=$("duration").textContent="—";$("backend").textContent=backendName||"—";$("details").textContent="Diagnostics will appear here.";$("run").disabled=true;});
 })();
 </script>
 </body></html>

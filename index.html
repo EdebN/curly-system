@@ -157,9 +157,7 @@
           <label class="button secondary file-button">Import species folder (supported browsers)<input id="folderPicker" type="file" accept="image/*,.heic,.heif,.avif,.tif,.tiff,.bmp" webkitdirectory directory multiple></label>
           <button id="clearLibrary" class="button danger-outline">Clear library</button>
         </div>
-        <label class="form-label" for="importLabel">Label for these imported images</label>
-        <input id="importLabel" class="text-input import-label-input" maxlength="120" placeholder="e.g. Australian magpie (leave blank to use folder names)">
-        <p class="helper">If you select several individual images, this label is applied to all of them. For folder imports, leave it blank to use each folder's name.</p>
+        <p class="helper">Images are imported first. Individual photos start as <strong>Unlabelled</strong>; folder imports keep their folder names. You can identify birds later with Edit or bulk labelling.</p>
         <p id="importStatus" class="helper" role="status">Your library is empty.</p>
       </div>
       <div class="card import-card workflow-step"><div class="card-heading"><div><p class="eyebrow">STEP 2 · SPECIES LABELS</p><h3>Label images in bulk</h3></div><button id="selectModeButton" class="button secondary select-mode-button">Select images</button></div><p class="muted">Select a group of images, choose Rename, and assign its label. Use the species name for bird photos. For clear bird-free photos, use <strong>Background</strong>; keep the entire original photo and leave its box list empty. Background is a negative example, not a species class.</p></div>
